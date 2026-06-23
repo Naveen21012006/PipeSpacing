@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build / distribution artifacts
+*.zip
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
