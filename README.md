@@ -6,7 +6,7 @@ move as one run, and crossing connector pipes are reshaped to follow.
 
 ## Requirements
 
-- **Autodesk Revit** (built/tested for Revit 2024).
+- **Autodesk Revit** (works with 2022, 2023, 2024 and 2025).
 - **pyRevit** installed — https://github.com/pyrevitlabs/pyRevit/releases
 
 No other downloads are needed; the tool uses only the Revit API and pyRevit.
@@ -27,7 +27,7 @@ No other downloads are needed; the tool uses only the Revit API and pyRevit.
 
 4. Click **pyRevit → Reload**.
 
-5. A new **PipeSpacing** tab appears with a **Tools** panel and the
+5. A new **CKR Tools** tab appears with a **Piping** panel and the
    **Pipe Spacing** button.
 
 > CLI alternative (instead of steps 2–4):
