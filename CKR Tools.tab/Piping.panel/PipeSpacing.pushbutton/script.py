@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """Pipe Spacing Tool.
 
-Automatically adjusts the clear spacing between selected non-sloped pipe
+Automatically adjusts the clear spacing between selected parallel pipe
 runs based on a user-defined clearance value, while keeping a user-chosen
 reference run fixed in place.
+
+Spacing happens within the active view's plane, so the tool works on
+horizontal pipes in a plan view *and* on vertical risers/stacks in a
+section or elevation view (they are spaced sideways across the view).
 
 A pipe run is the set of connected pipes, fittings and accessories that
 form one continuous straight line. Connected segments are grouped together
@@ -58,13 +62,13 @@ uidoc = revit.uidoc
 logger = script.get_logger()
 
 # Geometric tolerances expressed in Revit internal units (feet).
-# Used to decide whether pipes are parallel, level and non-sloped.
+# Used to decide whether pipes are parallel and lie in the view plane.
 ANGLE_TOLERANCE = 0.001        # radians, ~0.057 degrees
 ELEVATION_TOLERANCE = 0.0001   # feet, ~0.03 mm (negligible-distance epsilon)
-SLOPE_TOLERANCE = 0.0001       # feet, vertical run allowed across the pipe
 
-# How far apart in elevation pipes may sit and still count as "one level".
-# Kept practical (not the sub-mm epsilon above) to absorb modelling noise.
+# How far apart (along the view normal) pipes may sit and still count as
+# sharing one plane. Practical, not the sub-mm epsilon, to absorb modelling
+# noise - same elevation in a plan view, same depth in a section.
 SAME_ELEVATION_TOLERANCE = 5.0 / 304.8   # feet (~5 mm)
 
 # Max perpendicular gap for treating connected segments as one straight run.
@@ -135,23 +139,66 @@ def internal_to_mm(value_ft):
 # ---------------------------------------------------------------------------
 # Step 1 & 2 - Selection
 # ---------------------------------------------------------------------------
+def _resolve_to_pipe(element):
+    """Return the Pipe for a selected element, mapping insulation to its host.
+
+    Templates that make pipe insulation selectable can put a PipeInsulation
+    element in the selection (or under the cursor) instead of the pipe it
+    wraps. This resolves such an element back to its host pipe so insulated
+    pipes can be selected just like bare ones.
+
+    Args:
+        element: A selected or picked Revit element.
+
+    Returns:
+        Pipe | None: The pipe itself, the pipe hosting the insulation, or
+        None if the element is neither a pipe nor pipe insulation.
+    """
+    if isinstance(element, Pipe):
+        return element
+    if isinstance(element, PipeInsulation):
+        host = doc.GetElement(element.HostElementId)
+        if isinstance(host, Pipe):
+            return host
+    return None
+
+
+def _collect_pipes(elements, pipes, seen):
+    """Append the pipes resolved from elements to pipes, de-duplicated.
+
+    Args:
+        elements (iterable): Elements (pipes and/or insulation) to resolve.
+        pipes (list[Pipe]): Accumulator the resolved pipes are appended to.
+        seen (set): Ids already added, so an insulated pipe (selected as both
+            pipe and insulation) is not added twice.
+    """
+    for element in elements:
+        pipe = _resolve_to_pipe(element)
+        if pipe is None:
+            continue
+        key = _eid(pipe.Id)
+        if key not in seen:
+            seen.add(key)
+            pipes.append(pipe)
+
+
 def get_selected_pipes():
     """Return the currently selected pipes, prompting a pick if needed.
 
     First inspects the active selection. If no pipes are pre-selected, the
-    user is asked to pick pipes interactively.
+    user is asked to pick pipes interactively. Selected pipe insulation is
+    resolved back to its host pipe.
 
     Returns:
         list[Pipe]: The selected pipe elements (possibly empty).
     """
     pipes = []
+    seen = set()
 
     # Inspect the active selection first.
     selection_ids = uidoc.Selection.GetElementIds()
-    for el_id in selection_ids:
-        el = doc.GetElement(el_id)
-        if isinstance(el, Pipe):
-            pipes.append(el)
+    _collect_pipes(
+        (doc.GetElement(el_id) for el_id in selection_ids), pipes, seen)
 
     # Nothing useful pre-selected -> ask the user to pick pipes.
     if not pipes:
@@ -163,9 +210,7 @@ def get_selected_pipes():
             picked = None
 
         if picked:
-            for el in picked:
-                if isinstance(el, Pipe):
-                    pipes.append(el)
+            _collect_pipes(picked, pipes, seen)
 
     logger.debug('Collected {} pipe(s).'.format(len(pipes)))
     return pipes
@@ -199,7 +244,9 @@ def select_reference_pipe(pipes):
             logger.debug('Reference pick cancelled: {}'.format(ex))
             return None
 
-        reference = doc.GetElement(picked_ref.ElementId)
+        # Resolve insulation back to its host pipe (templates may make
+        # insulation the element picked under the cursor).
+        reference = _resolve_to_pipe(doc.GetElement(picked_ref.ElementId))
 
         # The picked element must belong to the originally selected set.
         if reference is not None and reference.Id in selected_ids:
@@ -236,7 +283,7 @@ def _get_pipe_line(pipe):
     return None
 
 
-def validate_pipes(pipes, reference):
+def validate_pipes(pipes, reference, view_normal):
     """Validate the pipe set against all geometric and selection rules.
 
     Checks performed (in order):
@@ -244,16 +291,21 @@ def validate_pipes(pipes, reference):
         * All elements are pipes.
         * Reference pipe belongs to the selected set.
         * All pipes are straight lines.
-        * No pipe is sloped (constant elevation along its run).
-        * Pipes parallel to the reference share the reference elevation.
+        * Every pipe lies in the active view's plane (drawn as a line in this
+          view, not running into it). In a plan this rejects sloped pipes; in
+          a section it allows vertical stacks.
+        * Pipes parallel to the reference share its plane (same position
+          along the view normal - same elevation in a plan, same depth in a
+          section).
 
     Pipes that run across the reference direction are no longer rejected;
     they are handled later as connectors (see partition_pipes()) and may
-    sit at other elevations.
+    sit out of the reference plane.
 
     Args:
         pipes (list[Pipe]): The selected pipes.
         reference (Pipe): The chosen reference pipe.
+        view_normal (XYZ): The active view's normal direction.
 
     Returns:
         bool: True if every check passes, otherwise False (a warning dialog
@@ -287,37 +339,42 @@ def validate_pipes(pipes, reference):
             return False
         lines.append(line)
 
-    # --- No sloped pipes ---------------------------------------------------
-    for line in lines:
-        start = line.GetEndPoint(0)
-        end = line.GetEndPoint(1)
-        if abs(start.Z - end.Z) > SLOPE_TOLERANCE:
+    # --- Every pipe lies in the active view's plane ------------------------
+    # A pipe whose direction has a component along the view normal runs
+    # into/out of the view and cannot be spaced within it. In a plan view
+    # this rejects sloped pipes; in a section it allows vertical stacks.
+    for pipe, line in zip(pipes, lines):
+        direction = line.Direction.Normalize()
+        if abs(direction.DotProduct(view_normal)) > ANGLE_TOLERANCE:
             forms.alert(
-                'Selected pipes contain sloped elements. Pipe Spacing Tool '
-                'supports only non-sloped pipes.',
+                'Pipe {} runs into the current view and cannot be spaced '
+                'here. Open the view where these pipes appear as straight '
+                'lines (a plan for horizontal pipes, a section/elevation for '
+                'risers).'.format(_eid(pipe.Id)),
                 title='Pipe Spacing')
             return False
 
     # Parallel grouping is no longer enforced here: pipes running across the
     # reference are separated out as connectors by partition_pipes().
 
-    # --- Same elevation (run pipes only) -----------------------------------
+    # --- Run pipes share the reference plane -------------------------------
     # Only the pipes that will actually be spaced (those parallel to the
-    # reference) must share its elevation. Crossing connectors are allowed
-    # to sit at other levels - they get reshaped to follow the runs.
+    # reference) must lie in the reference plane: same position along the
+    # view normal (same elevation in a plan, same depth in a section).
+    # Crossing connectors may sit elsewhere - they get reshaped to follow.
     ref_dir = _get_pipe_line(reference).Direction.Normalize()
-    base_z = _get_pipe_line(reference).GetEndPoint(0).Z
+    base_depth = _get_pipe_line(reference).GetEndPoint(0).DotProduct(view_normal)
     for pipe, line in zip(pipes, lines):
         direction = line.Direction.Normalize()
         if ref_dir.CrossProduct(direction).GetLength() > ANGLE_TOLERANCE:
             continue  # A crossing connector, not a run pipe.
-        dz = line.GetEndPoint(0).Z - base_z
-        if abs(dz) > SAME_ELEVATION_TOLERANCE:
+        offset = line.GetEndPoint(0).DotProduct(view_normal) - base_depth
+        if abs(offset) > SAME_ELEVATION_TOLERANCE:
             forms.alert(
-                'Pipe {} is at a different elevation from the reference '
+                'Pipe {} does not lie in the same plane as the reference '
                 '(off by {:.1f} mm). Pipes to be spaced must share the '
-                'reference elevation.'.format(
-                    _eid(pipe.Id), internal_to_mm(abs(dz))),
+                'reference plane.'.format(
+                    _eid(pipe.Id), internal_to_mm(abs(offset))),
                 title='Pipe Spacing')
             return False
 
@@ -801,23 +858,51 @@ def get_run_data(runs):
 # ---------------------------------------------------------------------------
 # Step 14-17 - Spacing calculation
 # ---------------------------------------------------------------------------
-def _perpendicular_axis(pipe_direction):
-    """Return a horizontal unit vector perpendicular to the pipe direction.
+def _active_view_normal():
+    """Return the active view's normal (the axis spacing is measured across).
 
-    Because all pipes are non-sloped and parallel, spacing is measured in
-    the horizontal plane perpendicular to the (shared) pipe direction.
+    Spacing happens within the active view's plane. The view normal (the
+    direction of sight) defines what "in plane" means:
+        * Plan view          -> normal is vertical (Z); horizontal pipes are
+                                spaced in plan (the original behaviour).
+        * Section/elevation  -> normal is horizontal; vertical stacks are
+                                spaced sideways across the view.
+
+    Returns:
+        XYZ: The normalized view direction, or world Z if it is unavailable.
+    """
+    try:
+        return uidoc.ActiveView.ViewDirection.Normalize()
+    except Exception as ex:
+        logger.debug('Active view normal unavailable, using Z: {}'.format(ex))
+        return XYZ(0, 0, 1)
+
+
+def _spacing_axis(pipe_direction, view_normal):
+    """Return the in-view-plane unit vector perpendicular to the pipe.
+
+    Spacing is measured along this axis: perpendicular to the (shared) pipe
+    direction and lying in the active view's plane. For a plan view this is
+    the horizontal perpendicular; for a section or elevation it is the axis
+    running across the view, so vertical stacks space sideways.
 
     Args:
         pipe_direction (XYZ): A pipe's normalized direction vector.
+        view_normal (XYZ): The active view's normal (see _active_view_normal).
 
     Returns:
-        XYZ: A normalized vector perpendicular to the pipe in the XY plane.
+        XYZ: A normalized vector perpendicular to the pipe, in the view plane.
     """
-    perp = XYZ(-pipe_direction.Y, pipe_direction.X, 0).Normalize()
-    return perp
+    axis = pipe_direction.CrossProduct(view_normal)
+    length = axis.GetLength()
+    if length < 1e-9:
+        # Pipe runs along the view normal (into the view). Validation should
+        # prevent this; fall back to a horizontal perpendicular just in case.
+        return XYZ(-pipe_direction.Y, pipe_direction.X, 0).Normalize()
+    return axis.Multiply(1.0 / length)
 
 
-def calculate_spacing(run_data, clearance_ft):
+def calculate_spacing(run_data, clearance_ft, view_normal):
     """Compute target offsets that re-space runs around the reference run.
 
     The runs are sorted along the perpendicular axis. The reference run
@@ -833,15 +918,17 @@ def calculate_spacing(run_data, clearance_ft):
     Args:
         run_data (list[dict]): Per-run data from get_run_data().
         clearance_ft (float): Desired clear distance (feet).
+        view_normal (XYZ): The active view's normal; spacing is measured
+            along the in-plane axis perpendicular to the runs.
 
     Returns:
         list[dict]: For every non-reference run, a dict with keys
         'element_ids', 'translation' (an XYZ vector) and 'pipes'. Returns an
         empty list when nothing needs to move.
     """
-    # Shared perpendicular axis (all runs are parallel).
+    # Shared spacing axis: perpendicular to the runs, in the view plane.
     direction = run_data[0]['line'].Direction.Normalize()
-    perp = _perpendicular_axis(direction)
+    perp = _spacing_axis(direction, view_normal)
 
     # Signed position of each run along the perpendicular axis.
     for entry in run_data:
@@ -982,8 +1069,12 @@ def main():
         forms.alert('Clearance value cannot be negative.', title='Pipe Spacing')
         return
 
+    # The active view defines the plane spacing happens in: a plan view spaces
+    # horizontal pipes, a section/elevation spaces vertical stacks sideways.
+    view_normal = _active_view_normal()
+
     # Steps 5-8: validate the selection geometry.
-    if not validate_pipes(pipes, reference):
+    if not validate_pipes(pipes, reference, view_normal):
         return
 
     # Separate the pipes to space (parallel to the reference) from the
@@ -1013,7 +1104,7 @@ def main():
 
     # Steps 14-17: compute spacing / movement offsets per run.
     clearance_ft = mm_to_internal(clearance_mm)
-    moves = calculate_spacing(run_data, clearance_ft)
+    moves = calculate_spacing(run_data, clearance_ft, view_normal)
 
     if not moves:
         forms.alert('Pipes are already at the requested spacing. '
