@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Pipe Insulation - Auto Apply & Update.
 
-Automatically creates or updates pipe insulation for every visible pipe in
-the active floor plan, based on company insulation standards. The connected
-pipe fittings and accessories (valves) are insulated too, so a whole run is
-covered rather than just its straight pipes.
+Creates or updates pipe insulation for the visible pipes in the active floor
+plan, based on company insulation standards. The user first chooses which of
+the detected pipe systems to insulate; only those are processed. The
+connected pipe fittings and accessories (valves) are insulated too, so a
+whole run is covered rather than just its straight pipes.
 
 For each pipe the tool:
     * reads its piping system (CCWS / CCWR / HWS / HWR / Condensate Drain),
@@ -432,21 +433,27 @@ def _required_thickness_for_pipe(pipe):
     return required, None
 
 
-def _required_thickness_for_part(element):
-    """Return (thickness_mm, skip_reason) for a fitting/valve.
+def _part_target_thickness(element, selected_systems):
+    """Return the insulation thickness (mm) for a fitting/valve, or None.
 
-    A fitting or accessory inherits the insulation of the pipes it joins, so
-    it is insulated to the thickest connected pipe (e.g. a reducer takes the
-    larger size). thickness_mm is None when no supported pipe is connected.
+    A fitting or accessory inherits the insulation of the pipes it joins,
+    limited to pipes whose system is in selected_systems, and is insulated to
+    the thickest of them (e.g. a reducer takes the larger size). Returns None
+    when no connected pipe belongs to a selected system (the part is then
+    left out of this run entirely).
+
+    Args:
+        element: A pipe fitting or accessory.
+        selected_systems (set): Canonical system codes chosen by the user.
     """
     thicknesses = []
     for pipe in get_connected_pipes(element):
+        if get_pipe_system(pipe) not in selected_systems:
+            continue
         thickness, _reason = _required_thickness_for_pipe(pipe)
         if thickness is not None:
             thicknesses.append(thickness)
-    if not thicknesses:
-        return None, 'no supported pipe connected'
-    return max(thicknesses), None
+    return max(thicknesses) if thicknesses else None
 
 
 def _apply_insulation(host, required, reason, insulation_type_id, counts,
@@ -539,6 +546,55 @@ def generate_report(counts, skipped_details, error_details):
 
 
 # ---------------------------------------------------------------------------
+# System selection
+# ---------------------------------------------------------------------------
+def get_present_systems(pipes):
+    """Group pipes by their supported system code.
+
+    Args:
+        pipes (list[Pipe]): The visible pipes.
+
+    Returns:
+        dict: {system_code: [pipes]} for supported systems found in the view.
+    """
+    present = {}
+    for pipe in pipes:
+        system = get_pipe_system(pipe)
+        if system is None:
+            continue
+        present.setdefault(system, []).append(pipe)
+    return present
+
+
+def select_pipe_systems(present):
+    """Ask the user which detected pipe systems to insulate.
+
+    Args:
+        present (dict): {system_code: [pipes]} from get_present_systems().
+
+    Returns:
+        set | None: Chosen system codes, or None if the user cancelled.
+    """
+    # Build a friendly "CODE  (N pipes)" label per detected system.
+    label_to_code = {}
+    for code in sorted(present):
+        label = '{}  ({} pipe{})'.format(
+            code, len(present[code]), '' if len(present[code]) == 1 else 's')
+        label_to_code[label] = code
+
+    labels = sorted(label_to_code.keys())
+    chosen = forms.SelectFromList.show(
+        labels,
+        title='Select Pipe Systems to Insulate',
+        button_name='Apply Insulation',
+        multiselect=True)
+
+    if not chosen:
+        return None
+    return set(label_to_code[label] for label in chosen)
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 def main():
@@ -550,12 +606,13 @@ def main():
                     title='Pipe Insulation')
         return
 
-    # Step 3: collect the visible pipes, fittings and valves.
+    # Step 3: collect the visible pipes and group them by system.
     pipes = get_visible_pipes()
-    parts = get_visible_pipe_parts()
-    if not pipes and not parts:
-        forms.alert('No pipes, fittings or valves are visible in the active '
-                    'view.', title='Pipe Insulation')
+    present = get_present_systems(pipes)
+    if not present:
+        forms.alert('No supported pipe systems (CCWS / CCWR / HWS / HWR / '
+                    'Condensate Drain) were found in this view.',
+                    title='Pipe Insulation')
         return
 
     # An insulation type is required to create insulation.
@@ -566,11 +623,27 @@ def main():
             'one, then run the tool again.', title='Pipe Insulation')
         return
 
+    # New step: let the user choose which detected systems to insulate.
+    selected_systems = select_pipe_systems(present)
+    if not selected_systems:
+        logger.debug('System selection cancelled.')
+        return
+
+    # Pipes of the chosen systems, and the fittings/valves that connect to
+    # them (each with its inherited thickness).
+    work_pipes = [pipe for code in selected_systems for pipe in present[code]]
+    work_parts = []
+    for part in get_visible_pipe_parts():
+        thickness = _part_target_thickness(part, selected_systems)
+        if thickness is not None:
+            work_parts.append((part, thickness))
+
     # User experience: confirm before making any changes.
     proceed = forms.alert(
-        'Found {} pipe(s) and {} fitting(s)/valve(s) in this view.\n\n'
+        '{} pipe(s) and {} fitting(s)/valve(s) in {} will be insulated.\n\n'
         'Apply or update insulation to company standards?'.format(
-            len(pipes), len(parts)),
+            len(work_pipes), len(work_parts),
+            ', '.join(sorted(selected_systems))),
         title='Pipe Insulation', yes=True, no=True)
     if not proceed:
         return
@@ -585,13 +658,12 @@ def main():
     # the run. Fittings/valves inherit the thickest connected pipe's value.
     with Transaction(doc, 'Pipe Insulation Auto Apply') as trans:
         trans.Start()
-        for pipe in pipes:
+        for pipe in work_pipes:
             required, reason = _required_thickness_for_pipe(pipe)
             _apply_insulation(pipe, required, reason, insulation_type_id,
                               counts, skipped_details, error_details, 'pipes')
-        for part in parts:
-            required, reason = _required_thickness_for_part(part)
-            _apply_insulation(part, required, reason, insulation_type_id,
+        for part, thickness in work_parts:
+            _apply_insulation(part, thickness, None, insulation_type_id,
                               counts, skipped_details, error_details, 'parts')
         trans.Commit()
 
