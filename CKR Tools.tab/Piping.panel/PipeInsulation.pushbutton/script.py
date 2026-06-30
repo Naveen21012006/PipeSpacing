@@ -2,10 +2,12 @@
 """Pipe Insulation - Auto Apply & Update.
 
 Creates or updates pipe insulation for the visible pipes in the active floor
-plan, based on company insulation standards. The user first chooses which of
-the detected pipe systems to insulate; only those are processed. The
-connected pipe fittings and accessories (valves) are insulated too, so a
-whole run is covered rather than just its straight pipes.
+plan. The user picks which piping systems to insulate (every system present
+in the view is listed) and which standard to apply - either auto-matching
+each pipe to its own system, or forcing one standard (e.g. apply the CCWS
+thicknesses to another system for a particular project). Connected pipe
+fittings and accessories (valves) are insulated too, so a whole run is
+covered rather than just its straight pipes.
 
 For each pipe the tool:
     * reads its piping system (CCWS / CCWR / HWS / HWR / Condensate Drain),
@@ -103,6 +105,12 @@ INSULATION_TYPE_NAME = None
 # Two thicknesses within this tolerance (mm) are treated as equal.
 THICKNESS_TOLERANCE_MM = 0.5
 # ===========================================================================
+
+# Sentinel + label for the "match each pipe to its own system" option in the
+# standard picker (see select_standard()). Any other value is a forced
+# standard code from INSULATION_STANDARDS applied to every selected pipe.
+AUTO_STANDARD_CODE = 'AUTO'
+AUTO_STANDARD_LABEL = 'Auto - match each pipe to its own system'
 
 
 # ---------------------------------------------------------------------------
@@ -415,42 +423,55 @@ def get_connected_pipes(element):
     return pipes
 
 
-def _required_thickness_for_pipe(pipe):
-    """Return (thickness_mm, skip_reason) for a pipe.
+def _thickness_for_pipe(pipe, standard):
+    """Return (thickness_mm, skip_reason) for a pipe under a chosen standard.
 
-    thickness_mm is None when the pipe should be skipped, in which case
-    skip_reason explains why.
+    Args:
+        pipe (Pipe): The pipe element.
+        standard (str): AUTO_STANDARD_CODE to use the pipe's own detected
+            system, or a forced standard code (e.g. 'CCWS') applied regardless
+            of the pipe's actual system.
+
+    Returns:
+        tuple: (thickness_mm, skip_reason). thickness_mm is None when the pipe
+        should be skipped, and skip_reason then explains why.
     """
-    system = get_pipe_system(pipe)
-    if system is None:
-        return None, 'unsupported system'
     dn_mm = get_nominal_diameter(pipe)
     if dn_mm is None:
         return None, 'no nominal diameter'
-    required = get_required_insulation(system, dn_mm)
+
+    if standard == AUTO_STANDARD_CODE:
+        code = get_pipe_system(pipe)
+        if code is None:
+            return None, 'system has no matching standard'
+    else:
+        code = standard
+
+    required = get_required_insulation(code, dn_mm)
     if required is None:
-        return None, '{} DN{:.0f} not in standards'.format(system, dn_mm)
+        return None, '{} DN{:.0f} not in standards'.format(code, dn_mm)
     return required, None
 
 
-def _part_target_thickness(element, selected_systems):
+def _part_target_thickness(element, selected_labels, standard):
     """Return the insulation thickness (mm) for a fitting/valve, or None.
 
     A fitting or accessory inherits the insulation of the pipes it joins,
-    limited to pipes whose system is in selected_systems, and is insulated to
-    the thickest of them (e.g. a reducer takes the larger size). Returns None
-    when no connected pipe belongs to a selected system (the part is then
-    left out of this run entirely).
+    limited to pipes whose system label is in selected_labels, and is
+    insulated to the thickest of them (e.g. a reducer takes the larger size)
+    using the chosen standard. Returns None when no connected pipe belongs to
+    a selected system (the part is then left out of this run entirely).
 
     Args:
         element: A pipe fitting or accessory.
-        selected_systems (set): Canonical system codes chosen by the user.
+        selected_labels (set): System labels chosen by the user.
+        standard (str): AUTO_STANDARD_CODE or a forced standard code.
     """
     thicknesses = []
     for pipe in get_connected_pipes(element):
-        if get_pipe_system(pipe) not in selected_systems:
+        if get_pipe_system_label(pipe) not in selected_labels:
             continue
-        thickness, _reason = _required_thickness_for_pipe(pipe)
+        thickness, _reason = _thickness_for_pipe(pipe, standard)
         if thickness is not None:
             thicknesses.append(thickness)
     return max(thicknesses) if thicknesses else None
@@ -548,50 +569,94 @@ def generate_report(counts, skipped_details, error_details):
 # ---------------------------------------------------------------------------
 # System selection
 # ---------------------------------------------------------------------------
+def get_pipe_system_label(pipe):
+    """Return a display label for a pipe's piping system (every system).
+
+    Unlike get_pipe_system() (which maps to a configured standard code or
+    None), this returns the pipe's actual system identifier so that ALL
+    systems present in the model can be listed - the System Type name, then
+    the abbreviation / system name / classification as fallbacks.
+    """
+    type_param = pipe.get_Parameter(
+        BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)
+    if type_param is not None:
+        type_element = doc.GetElement(type_param.AsElementId())
+        if type_element is not None:
+            name = _element_name(type_element)
+            if name:
+                return name
+    for built_in in (BuiltInParameter.RBS_SYSTEM_ABBREVIATION_PARAM,
+                     BuiltInParameter.RBS_SYSTEM_NAME_PARAM,
+                     BuiltInParameter.RBS_SYSTEM_CLASSIFICATION_PARAM):
+        value = _param_string(pipe, built_in)
+        if value:
+            return value
+    return '<no system>'
+
+
 def get_present_systems(pipes):
-    """Group pipes by their supported system code.
+    """Group visible pipes by piping system label (all systems, configured or
+    not).
 
     Args:
         pipes (list[Pipe]): The visible pipes.
 
     Returns:
-        dict: {system_code: [pipes]} for supported systems found in the view.
+        dict: {system_label: [pipes]} for every system found in the view.
     """
     present = {}
     for pipe in pipes:
-        system = get_pipe_system(pipe)
-        if system is None:
-            continue
-        present.setdefault(system, []).append(pipe)
+        present.setdefault(get_pipe_system_label(pipe), []).append(pipe)
     return present
 
 
 def select_pipe_systems(present):
-    """Ask the user which detected pipe systems to insulate.
+    """Ask the user which piping systems to insulate (all systems listed).
 
     Args:
-        present (dict): {system_code: [pipes]} from get_present_systems().
+        present (dict): {system_label: [pipes]} from get_present_systems().
 
     Returns:
-        set | None: Chosen system codes, or None if the user cancelled.
+        set | None: Chosen system labels, or None if the user cancelled.
     """
-    # Build a friendly "CODE  (N pipes)" label per detected system.
-    label_to_code = {}
-    for code in sorted(present):
-        label = '{}  ({} pipe{})'.format(
-            code, len(present[code]), '' if len(present[code]) == 1 else 's')
-        label_to_code[label] = code
+    # Build a friendly "System  (N pipes)" label per detected system.
+    display_to_label = {}
+    for system_label in sorted(present):
+        count = len(present[system_label])
+        display = '{}  ({} pipe{})'.format(
+            system_label, count, '' if count == 1 else 's')
+        display_to_label[display] = system_label
 
-    labels = sorted(label_to_code.keys())
     chosen = forms.SelectFromList.show(
-        labels,
+        sorted(display_to_label.keys()),
         title='Select Pipe Systems to Insulate',
-        button_name='Apply Insulation',
+        button_name='Next',
         multiselect=True)
 
     if not chosen:
         return None
-    return set(label_to_code[label] for label in chosen)
+    return set(display_to_label[display] for display in chosen)
+
+
+def select_standard():
+    """Ask which insulation standard to apply to the selected systems.
+
+    Returns:
+        str | None: AUTO_STANDARD_CODE to match each pipe to its own system, a
+        forced standard code (e.g. 'CCWS'), or None if the user cancelled.
+    """
+    options = [AUTO_STANDARD_LABEL] + sorted(INSULATION_STANDARDS.keys())
+    chosen = forms.SelectFromList.show(
+        options,
+        title='Select Insulation Standard to Apply',
+        button_name='Apply Insulation',
+        multiselect=False)
+
+    if not chosen:
+        return None
+    if chosen == AUTO_STANDARD_LABEL:
+        return AUTO_STANDARD_CODE
+    return chosen
 
 
 # ---------------------------------------------------------------------------
@@ -606,12 +671,11 @@ def main():
                     title='Pipe Insulation')
         return
 
-    # Step 3: collect the visible pipes and group them by system.
+    # Step 3: collect the visible pipes and group them by system (all systems).
     pipes = get_visible_pipes()
     present = get_present_systems(pipes)
     if not present:
-        forms.alert('No supported pipe systems (CCWS / CCWR / HWS / HWR / '
-                    'Condensate Drain) were found in this view.',
+        forms.alert('No pipes are visible in the active view.',
                     title='Pipe Insulation')
         return
 
@@ -623,27 +687,36 @@ def main():
             'one, then run the tool again.', title='Pipe Insulation')
         return
 
-    # New step: let the user choose which detected systems to insulate.
-    selected_systems = select_pipe_systems(present)
-    if not selected_systems:
+    # Step A: choose which systems to insulate (every system in the view).
+    selected_labels = select_pipe_systems(present)
+    if not selected_labels:
         logger.debug('System selection cancelled.')
         return
 
+    # Step B: choose which standard to apply - auto-match each pipe to its own
+    # system, or force one standard (e.g. apply CCWS thicknesses to another
+    # system for this project).
+    standard = select_standard()
+    if not standard:
+        logger.debug('Standard selection cancelled.')
+        return
+
     # Pipes of the chosen systems, and the fittings/valves that connect to
-    # them (each with its inherited thickness).
-    work_pipes = [pipe for code in selected_systems for pipe in present[code]]
+    # them (each with its inherited thickness under the chosen standard).
+    work_pipes = [pipe for label in selected_labels for pipe in present[label]]
     work_parts = []
     for part in get_visible_pipe_parts():
-        thickness = _part_target_thickness(part, selected_systems)
+        thickness = _part_target_thickness(part, selected_labels, standard)
         if thickness is not None:
             work_parts.append((part, thickness))
 
     # User experience: confirm before making any changes.
+    standard_text = ('auto-matched standards' if standard == AUTO_STANDARD_CODE
+                     else "the {} standard".format(standard))
     proceed = forms.alert(
-        '{} pipe(s) and {} fitting(s)/valve(s) in {} will be insulated.\n\n'
-        'Apply or update insulation to company standards?'.format(
-            len(work_pipes), len(work_parts),
-            ', '.join(sorted(selected_systems))),
+        '{} pipe(s) and {} fitting(s)/valve(s) will be insulated using '
+        '{}.\n\nProceed?'.format(
+            len(work_pipes), len(work_parts), standard_text),
         title='Pipe Insulation', yes=True, no=True)
     if not proceed:
         return
@@ -659,7 +732,7 @@ def main():
     with Transaction(doc, 'Pipe Insulation Auto Apply') as trans:
         trans.Start()
         for pipe in work_pipes:
-            required, reason = _required_thickness_for_pipe(pipe)
+            required, reason = _thickness_for_pipe(pipe, standard)
             _apply_insulation(pipe, required, reason, insulation_type_id,
                               counts, skipped_details, error_details, 'pipes')
         for part, thickness in work_parts:
