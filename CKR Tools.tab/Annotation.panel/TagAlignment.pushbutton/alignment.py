@@ -281,13 +281,25 @@ def _declutter_blocks(order, targets, pitch):
 
 
 class _ClusterReferenceLine(AlignmentStrategy):
-    """Cluster one-tag-per-run tags on a reference line, centred on their pipes.
+    """Cluster one-tag-per-run tags on a reference line.
 
-    Every tag is drawn towards the height of its own pipe, so its leader stays
-    short. Where several tags would overlap they de-overlap into a tidy cluster
-    centred on that group (see _declutter_blocks), ordered left-to-right with
-    the left-most pipe on top. The reference line sets only the horizontal
-    position; `edge` picks which tag edge lands on it.
+    Two behaviours, chosen automatically from the tagged pipes' orientation in
+    the view:
+
+    * Vertical pipes (level mode): each tag is drawn towards the height of its
+      own pipe, so its leader stays short and level. Where several tags would
+      overlap they de-overlap into a tidy cluster centred on that group (see
+      _declutter_blocks), ordered left-to-right with the left-most pipe on top.
+
+    * Horizontal pipes (L-leader mode): a level leader would sit on the pipe, so
+      the tags stack in a column on the line and each leader turns 90 degrees
+      down to the MIDDLE of its own pipe segment. Where several segments share a
+      middle (a bundle) their drops fan apart, centred on that middle, so no two
+      overlap. See _horizontal_moves; the elbow geometry is applied later by
+      leader_manager.apply_elbows() via context['leader_plan'].
+
+    In both cases the reference line sets the across position and `edge` picks
+    which tag edge lands on it. Only tag heads are moved here.
     """
 
     requires_reference_line = True
@@ -300,40 +312,57 @@ class _ClusterReferenceLine(AlignmentStrategy):
             return []
 
         doc = context.get('doc')
+        count = len(tags)
         right, up = utils.get_view_axes(view)
         heads = [tag.TagHeadPosition for tag in tags]
         bounds = _measure_head_bounds(tags, view, doc)
 
-        # Each tag is pulled toward its own pipe's height (target_up), and its
-        # left-to-right position comes from the pipe's across-coordinate
-        # (order_key).
-        target_up = []
-        order_key = []
+        # Per-tag geometry in the view's axes: the pipe's height and left-right
+        # position, and whether it runs horizontally in the view.
+        pipe_up = []
+        pipe_across = []
+        horizontal = []
+        elements = []
         for index, tag in enumerate(tags):
             element = _tag_element(tag, doc)
+            elements.append(element)
             anchor = utils.get_element_anchor(element, view) if element else None
             if anchor is not None:
-                target_up.append(utils.project(anchor, up))
-                order_key.append(utils.project(anchor, right))
+                pipe_up.append(utils.project(anchor, up))
+                pipe_across.append(utils.project(anchor, right))
             else:
-                target_up.append(utils.project(heads[index], up))
-                order_key.append(utils.project(heads[index], right))
+                pipe_up.append(utils.project(heads[index], up))
+                pipe_across.append(utils.project(heads[index], right))
+            direction = utils.get_element_direction(element) if element else None
+            horizontal.append(
+                direction is not None
+                and abs(utils.project(direction, up))
+                < abs(utils.project(direction, right)))
 
-        # Tags whose pipe heights collide form a cluster (centred on the
-        # group). WITHIN a cluster, order strictly left-to-right - the
-        # left-most pipe on top - regardless of the small height differences
-        # between the tagged segments.
         pitch = _readable_pitch(bounds, view, 1)
-        by_height = sorted(range(len(tags)), key=lambda i: target_up[i])
-        height_targets = {}
-        for block in _declutter_blocks(by_height, target_up, pitch):
-            top = block['centre'] + (block['n'] - 1) * pitch / 2.0
-            left_to_right = sorted(block['members'], key=lambda i: order_key[i])
-            for step, index in enumerate(left_to_right):
-                height_targets[index] = top - step * pitch
 
+        # Horizontal pipes can't take a level leader, so if the tagged set is
+        # mostly horizontal, switch to the L-leader column. Otherwise keep the
+        # level behaviour (each tag drawn to its own pipe's height).
+        if sum(1 for flag in horizontal if flag) * 2 > count:
+            return self._horizontal_moves(
+                tags, view, context, line, right, up, heads, bounds,
+                pipe_up, pipe_across, horizontal, elements, pitch)
+        return self._level_moves(
+            tags, line, right, up, heads, bounds, pipe_up, pipe_across, pitch)
+
+    # -- shared head placement --------------------------------------------
+    def _assemble_moves(self, tags, line, right, up, heads, bounds,
+                        height_targets):
+        """Move each tag's chosen edge onto the line at its target height.
+
+        Returns (moves, new_heads): moves omits tags already in position;
+        new_heads holds the resulting head position for every tag (the
+        L-leader mode needs them even when the tag did not move).
+        """
         across_coords = [utils.project(head, right) for head in heads]
         moves = []
+        new_heads = {}
         for index, tag in enumerate(tags):
             spans = bounds.get(index)
             span = spans[0] if spans else None
@@ -346,13 +375,146 @@ class _ClusterReferenceLine(AlignmentStrategy):
             delta_across = target_across - anchor
             delta_height = target_height - utils.project(heads[index], up)
 
-            if (abs(delta_across) < config.POSITION_TOLERANCE
-                    and abs(delta_height) < config.POSITION_TOLERANCE):
-                continue
-
             new_head = utils.shift(heads[index], right, delta_across)
             new_head = utils.shift(new_head, up, delta_height)
-            moves.append((tag, new_head))
+            new_heads[index] = new_head
+
+            if not (abs(delta_across) < config.POSITION_TOLERANCE
+                    and abs(delta_height) < config.POSITION_TOLERANCE):
+                moves.append((tag, new_head))
+        return moves, new_heads
+
+    # -- level mode (vertical pipes) --------------------------------------
+    def _level_moves(self, tags, line, right, up, heads, bounds,
+                     target_up, order_key, pitch):
+        """Draw each tag to its own pipe's height, de-overlapping into clusters.
+
+        Tags whose pipe heights collide form a cluster (centred on the group).
+        WITHIN a cluster, order strictly left-to-right - the left-most pipe on
+        top - regardless of the small height differences between segments.
+        """
+        by_height = sorted(range(len(tags)), key=lambda i: target_up[i])
+        height_targets = {}
+        for block in _declutter_blocks(by_height, target_up, pitch):
+            top = block['centre'] + (block['n'] - 1) * pitch / 2.0
+            left_to_right = sorted(block['members'], key=lambda i: order_key[i])
+            for step, index in enumerate(left_to_right):
+                height_targets[index] = top - step * pitch
+
+        moves, _new_heads = self._assemble_moves(
+            tags, line, right, up, heads, bounds, height_targets)
+        return moves
+
+    # -- L-leader mode (horizontal pipes) ---------------------------------
+    def _horizontal_moves(self, tags, view, context, line, right, up, heads,
+                          bounds, pipe_up, pipe_across, horizontal, elements,
+                          pitch):
+        """Stack the tags in a column and plan a 90-degree leader for each.
+
+        The column is anchored to the top of the reference line and ordered
+        highest-pipe-on-top. Each horizontal pipe then gets an elbow at
+        (turn_across, tag_height) - a horizontal landing from the head, a
+        vertical drop to the pipe - where turn_across is the MIDDLE of that
+        pipe's own segment, so the drop lands on its centre. Segments sharing a
+        middle (a bundle) fan their drops apart, centred on that middle. The
+        per-tag elbow/arrow points are handed to leader_manager via
+        context['leader_plan']; only the head moves are returned here.
+        """
+        count = len(tags)
+
+        # Column: highest pipe on top, stacking downward at pitch, anchored to
+        # the upper end of the reference line the user drew.
+        top_to_bottom = sorted(range(count), key=lambda i: pipe_up[i],
+                               reverse=True)
+        column_top = max(utils.project(line.GetEndPoint(0), up),
+                         utils.project(line.GetEndPoint(1), up))
+        height_targets = {}
+        rank_of = {}
+        for rank, index in enumerate(top_to_bottom):
+            height_targets[index] = column_top - rank * pitch
+            rank_of[index] = rank
+
+        moves, new_heads = self._assemble_moves(
+            tags, line, right, up, heads, bounds, height_targets)
+
+        # Do the pipes sit ABOVE or BELOW the tag column? Inside a fanned
+        # cluster this decides which way the risers nest so their leaders do
+        # not cross: pipes above -> the top tag (rank 0) takes the near end of
+        # the fan; pipes below -> the bottom tag.
+        horizontal_ups = [pipe_up[i] for i in range(count) if horizontal[i]]
+        mean_pipe_up = (sum(horizontal_ups) / float(len(horizontal_ups))
+                        if horizontal_ups else sum(pipe_up) / float(count))
+        column_centre = column_top - (count - 1) * pitch / 2.0
+        pipes_above = mean_pipe_up >= column_centre
+
+        step = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_STEP_MM)
+        clear = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_CLEAR_MM)
+
+        # Each riser drops at the MIDDLE of its own pipe segment - pipe_across
+        # is that segment's centreline midpoint - so distinct segments get
+        # their leader on their own centre. Where several segments share a
+        # middle (a parallel bundle) the risers would stack on one line, so
+        # overlapping ones fan apart by `step`, centred on the shared middle: a
+        # tidy cluster instead of a clubbed line. This reuses the same
+        # de-overlap as the tag column (_declutter_blocks), run along the
+        # across axis. Within a cluster the risers follow the column order so
+        # their leaders nest rather than cross.
+        desired = {}
+        for index in range(count):
+            if horizontal[index]:
+                desired[index] = pipe_across[index]
+
+        # Within a fanned cluster the risers must run in an order that nests the
+        # leaders. A cluster's "near" end (the side facing the tag column) has
+        # to hold the top tag when the pipes are above the column and the bottom
+        # tag when below - otherwise a riser cuts across the landings between it
+        # and its pipe. Which fan end is "near" flips with the side the pipes
+        # sit on, so both the vertical sense (pipes_above) and the horizontal
+        # one (the column's side of this cluster) decide the order.
+        column_across = _reference_coordinate_at(line, right, up, column_top)
+
+        turn_of = {}
+        across_order = sorted(desired.keys(), key=lambda i: desired[i])
+        for block in _declutter_blocks(across_order, desired, step):
+            members = block['members']
+            leftmost = block['centre'] - (block['n'] - 1) * step / 2.0
+            near_is_left = block['centre'] >= column_across
+            if pipes_above == near_is_left:
+                ordered = sorted(members, key=lambda i: rank_of[i])
+            else:
+                ordered = sorted(members, key=lambda i: -rank_of[i])
+            for offset, index in enumerate(ordered):
+                turn = leftmost + offset * step
+                span = utils.get_curve_span(elements[index], right)
+                if span is not None:
+                    low, high = span[0] + clear, span[1] - clear
+                    if low <= high:
+                        turn = min(max(turn, low), high)
+                turn_of[index] = turn
+
+        plan = []
+        for index, tag in enumerate(tags):
+            if not horizontal[index]:
+                continue  # a stray non-horizontal tag keeps a normal leader
+
+            turn_across = turn_of[index]
+            head = new_heads[index]
+            elbow = utils.shift(
+                head, right, turn_across - utils.project(head, right))
+
+            # Arrow on the pipe at the turn-down (used only in free-end mode).
+            anchor_pt = utils.get_element_anchor(elements[index], view)
+            if anchor_pt is not None:
+                arrow = utils.shift(
+                    anchor_pt, right,
+                    turn_across - utils.project(anchor_pt, right))
+            else:
+                arrow = utils.shift(
+                    elbow, up, pipe_up[index] - utils.project(elbow, up))
+
+            plan.append((tag, elbow, arrow))
+
+        context['leader_plan'] = plan
         return moves
 
 

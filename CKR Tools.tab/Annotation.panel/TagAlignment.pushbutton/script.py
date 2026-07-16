@@ -223,7 +223,29 @@ def main():
             moved, move_failures = alignment.align_tags(
                 tags, view, method, context)
             doc.Regenerate()  # Leaders must see the new head positions.
-            leaders_updated, leader_failures = leaders.maintain(tags)
+
+            # Horizontal runs get explicit L-shaped (90-degree) leaders; the
+            # strategy leaves an elbow plan in the context for them. Everything
+            # else keeps the clean toggle-rebuild. Managed tags are skipped by
+            # maintain() so their elbows are not wiped.
+            plan = context.get('leader_plan') or []
+            managed = set(utils.element_id_value(tag.Id)
+                          for tag, _elbow, _arrow in plan)
+
+            leaders_updated = 0
+            leader_failures = []
+            if plan:
+                set_count, elbow_failures = leaders.apply_elbows(
+                    plan, free_end=config.HORIZONTAL_LEADER_FREE_END)
+                leaders_updated += set_count
+                leader_failures.extend(elbow_failures)
+
+            rest = [tag for tag in tags
+                    if utils.element_id_value(tag.Id) not in managed]
+            refreshed, refresh_failures = leaders.maintain(rest)
+            leaders_updated += refreshed
+            leader_failures.extend(refresh_failures)
+
             transaction.Commit()
         failures.extend(move_failures)
         failures.extend(leader_failures)

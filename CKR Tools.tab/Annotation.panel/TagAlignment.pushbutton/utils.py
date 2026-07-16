@@ -156,6 +156,45 @@ def get_element_anchor(element, view):
     return None
 
 
+def get_element_direction(element):
+    """Return the unit direction of an element's location curve, or None.
+
+    Computed from the curve endpoints (not curve.Direction) so it works for
+    lines and arcs alike. Point-located elements (fittings, equipment) have no
+    direction and return None - the caller then treats them as non-linear.
+    """
+    try:
+        location = element.Location
+        curve = location.Curve if isinstance(location, LocationCurve) else None
+        if curve is None:
+            return None
+        vector = curve.GetEndPoint(1).Subtract(curve.GetEndPoint(0))
+        return vector.Normalize() if vector.GetLength() > 1e-9 else None
+    except Exception:
+        return None
+
+
+def get_curve_span(element, axis):
+    """Return (low, high) of an element's curve endpoints along a view axis.
+
+    Used to keep a leader's turn-down inside the pipe it points at, so an
+    attached arrow can't be pushed past the pipe's end.
+
+    Returns:
+        tuple | None: (low, high) in feet, or None if the element has no curve.
+    """
+    try:
+        location = element.Location
+        curve = location.Curve if isinstance(location, LocationCurve) else None
+        if curve is None:
+            return None
+        start = project(curve.GetEndPoint(0), axis)
+        end = project(curve.GetEndPoint(1), axis)
+        return (min(start, end), max(start, end))
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # View-plane geometry
 # ---------------------------------------------------------------------------

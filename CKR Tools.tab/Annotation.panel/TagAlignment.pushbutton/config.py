@@ -119,6 +119,33 @@ TAG_INITIAL_OFFSET_MM = 10.0
 # moved, so Revit rebuilds each one cleanly from the tag's final position -
 # exactly what happens when you uncheck/recheck the leader by hand. Revit owns
 # the geometry; there is nothing to tune here (see leader_manager.py).
+#
+# The exception is horizontal pipes (below), where the tool owns the geometry
+# so the leader can turn 90 degrees down to the pipe.
+
+
+# ---------------------------------------------------------------------------
+# Horizontal-pipe leaders (L-shaped / 90-degree)
+# ---------------------------------------------------------------------------
+# When the tagged pipes run horizontally in the view, a level leader would sit
+# on top of the pipe. Instead the tags stack in a column on the reference line
+# and each leader turns 90 degrees: a horizontal landing from the tag, then a
+# vertical drop to the pipe. Each drop lands at the MIDDLE of its own pipe
+# segment; where segments share a middle (a parallel bundle) the drops fan
+# apart, centred on that middle, so they never stack on one line.
+#
+# Both distances are paper (mm), scaled by the view scale.
+HORIZONTAL_LEADER_STEP_MM = 6.0    # fan spacing between drops that share a middle
+HORIZONTAL_LEADER_CLEAR_MM = 2.0   # keep the drop this far inside the pipe ends
+
+# Leader end condition for the horizontal L-leaders:
+#   False -> Attached: Revit slides the arrow along the pipe to sit under the
+#            elbow; the leader stays linked and auto-follows if the pipe moves.
+#            This is the default and matches dragging the grip by hand.
+#   True  -> Free end: the tool sets the arrow point explicitly. Guarantees the
+#            clean L on any Revit build, but the arrow will not follow later
+#            pipe moves. Flip to True only if Attached misbehaves on a version.
+HORIZONTAL_LEADER_FREE_END = False
 
 
 # ---------------------------------------------------------------------------
