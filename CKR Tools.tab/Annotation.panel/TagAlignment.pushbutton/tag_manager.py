@@ -11,10 +11,12 @@ All document modification happens in the caller's transaction.
 from collections import OrderedDict
 
 from Autodesk.Revit.DB import (
+    BuiltInParameter,
     FamilySymbol,
     FilteredElementCollector,
     IndependentTag,
 )
+from Autodesk.Revit.DB.Plumbing import Pipe
 
 import config
 import utils
@@ -32,6 +34,7 @@ class TagManager(object):
         self.doc = doc
         self.view = view
         self._tag_type_cache = {}          # tag category int -> ElementId
+        self._elevation_cache = {}         # 'high'/'low' -> ElementId
         self._existing = self._index_existing_tags()
         self._right, _up = utils.get_view_axes(view)
         self._initial_offset = utils.paper_mm_to_model(
@@ -109,6 +112,13 @@ class TagManager(object):
         if tag_category is None:
             return None
 
+        # Water-supply pipes are typed per pipe by elevation (HL / LL), never
+        # cached per category. Everything else falls through to the normal
+        # one-type-per-category selection below.
+        elevation_id = self._elevation_tag_type_id(element, tag_category)
+        if elevation_id is not None:
+            return elevation_id
+
         if category_value in self._tag_type_cache:
             return self._tag_type_cache[category_value]
 
@@ -159,6 +169,127 @@ class TagManager(object):
         except Exception as ex:
             utils.logger.debug('Could not activate tag type: {}'.format(ex))
 
+    # -- elevation-based pipe tags (High Level / Low Level) ----------------
+    def _pipe_system_names(self, pipe):
+        """Return the pipe's system type and classification names."""
+        names = []
+        try:
+            system = pipe.MEPSystem
+            if system is not None:
+                system_type = self.doc.GetElement(system.GetTypeId())
+                if system_type is not None:
+                    name = utils.get_element_name(system_type)
+                    if name:
+                        names.append(name)
+        except Exception:
+            pass
+
+        for parameter_name in ('RBS_PIPING_SYSTEM_TYPE_PARAM',
+                               'RBS_SYSTEM_CLASSIFICATION_PARAM'):
+            parameter_id = getattr(BuiltInParameter, parameter_name, None)
+            if parameter_id is None:
+                continue
+            try:
+                parameter = pipe.get_Parameter(parameter_id)
+                if parameter is not None:
+                    value = parameter.AsValueString()
+                    if value:
+                        names.append(value)
+            except Exception:
+                pass
+        return names
+
+    def _is_target_system(self, pipe):
+        """True if the elevation (HL/LL) rule applies to this pipe's system."""
+        targets = [text.strip().lower()
+                   for text in config.ELEVATION_TAG_SYSTEMS if text.strip()]
+        if not targets:
+            return True  # empty list -> every pipe
+        for name in self._pipe_system_names(pipe):
+            lowered = name.lower()
+            if any(target in lowered for target in targets):
+                return True
+        return False
+
+    def _floor_elevation(self, pipe):
+        """Return the elevation to measure the pipe's height against (feet).
+
+        The active plan view's level when there is one; otherwise the pipe's
+        own reference level; failing both, zero.
+        """
+        try:
+            level = self.view.GenLevel
+            if level is not None:
+                return level.Elevation
+        except Exception:
+            pass
+        try:
+            parameter = pipe.get_Parameter(BuiltInParameter.RBS_START_LEVEL_PARAM)
+            if parameter is not None:
+                level = self.doc.GetElement(parameter.AsElementId())
+                if level is not None:
+                    return level.Elevation
+        except Exception:
+            pass
+        return 0.0
+
+    def _pipe_height_above_floor(self, pipe):
+        """Return the pipe centreline height above the floor (feet), or None."""
+        try:
+            point = pipe.Location.Curve.Evaluate(0.5, True)
+        except Exception:
+            return None
+        return point.Z - self._floor_elevation(pipe)
+
+    def _find_symbol(self, tag_category, family_name, type_name):
+        """Return the id of the loaded tag symbol matching the names, or None."""
+        for symbol in (FilteredElementCollector(self.doc)
+                       .OfClass(FamilySymbol)
+                       .OfCategory(tag_category)
+                       .ToElements()):
+            if self._symbol_matches(symbol, family_name, type_name):
+                return symbol.Id
+        return None
+
+    def _elevation_symbol_id(self, tag_category, high):
+        """Return the HL (high=True) or LL tag symbol id, resolved once."""
+        key = 'high' if high else 'low'
+        if key in self._elevation_cache:
+            return self._elevation_cache[key]
+
+        family_name, type_name = (config.ELEVATION_TAG_HIGH if high
+                                  else config.ELEVATION_TAG_LOW)
+        symbol_id = self._find_symbol(tag_category, family_name, type_name)
+        if symbol_id is None:
+            utils.logger.warning(
+                'Elevation tag "{} : {}" is not loaded in this project; that '
+                'pipe falls back to the normal tag type.'.format(
+                    family_name, type_name))
+        self._elevation_cache[key] = symbol_id
+        return symbol_id
+
+    def _elevation_applies(self, element):
+        """True if the HL/LL elevation rule governs this element's tag type."""
+        return (config.ELEVATION_TAG_ENABLED
+                and isinstance(element, Pipe)
+                and self._is_target_system(element))
+
+    def _elevation_tag_type_id(self, element, tag_category):
+        """Return the HL/LL tag symbol id for a water-supply pipe, else None.
+
+        High Level at or above config.ELEVATION_TAG_THRESHOLD_MM, Low Level
+        below it. Returns None for anything the rule does not cover, or when
+        the pipe's height or the HL/LL family cannot be resolved - the caller
+        then uses the normal one-type-per-category selection.
+        """
+        if not self._elevation_applies(element):
+            return None
+        height = self._pipe_height_above_floor(element)
+        if height is None:
+            return None
+        threshold = utils.mm_to_feet(config.ELEVATION_TAG_THRESHOLD_MM)
+        return self._elevation_symbol_id(tag_category, height >= threshold)
+
     # -- runtime tag type selection ----------------------------------------
     def categories_needing_tags(self, elements):
         """Return {category id: category name} for elements with no tag yet.
@@ -179,6 +310,11 @@ class TagManager(object):
             category_value = utils.get_category_id_value(element)
             if category_value is None:
                 continue
+            tag_category = config.SUPPORTED_CATEGORIES.get(category_value)
+            if (tag_category is not None
+                    and self._elevation_tag_type_id(element, tag_category)
+                    is not None):
+                continue  # Auto HL/LL by elevation - no tag type to choose.
             if category_value not in pending:
                 pending[category_value] = utils.get_category_name(element)
         return pending

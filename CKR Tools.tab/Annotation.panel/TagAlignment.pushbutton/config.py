@@ -98,6 +98,33 @@ PREFERRED_TAG_TYPES = _build_preferred_tag_types()
 
 
 # ---------------------------------------------------------------------------
+# Pipe tag by elevation: High Level / Low Level
+# ---------------------------------------------------------------------------
+# Water-supply pipes are tagged HL or LL automatically, from how high the pipe
+# sits above the floor plan's level (its centreline elevation minus the active
+# plan view's level elevation): at or above ELEVATION_TAG_THRESHOLD_MM it gets
+# the HL tag, below it the LL tag. No prompt for these pipes.
+#
+# This only touches pipes whose System Type (or classification) name contains
+# one of ELEVATION_TAG_SYSTEMS (case-insensitive). Any other pipe - and every
+# non-pipe - is untouched and still uses the normal single tag-type choice.
+ELEVATION_TAG_ENABLED = True
+ELEVATION_TAG_THRESHOLD_MM = 1500.0
+
+# (family name, type name) of the tag to use on each side of the threshold.
+# Either name may be None to match on the other alone; matched case-insensitively
+# against the loaded tag families, exactly like PREFERRED_TAG_TYPES.
+ELEVATION_TAG_HIGH = ('ME-Pipe Size Tag-HL', 'Pipe Size Tag-HL')   # >= threshold
+ELEVATION_TAG_LOW = ('ME-Pipe Size Tag-LL', 'Pipe Size Tag-LL')    # <  threshold
+
+# A pipe gets the HL/LL rule only when its System Type or classification name
+# contains one of these (case-insensitive). Add your exact water-supply system
+# type name(s) here to be precise; the default catches "... Water ..." names
+# (Domestic Cold Water, Domestic Hot Water, ...). An empty list = every pipe.
+ELEVATION_TAG_SYSTEMS = ['water']
+
+
+# ---------------------------------------------------------------------------
 # Tag creation defaults
 # ---------------------------------------------------------------------------
 # Create new tags with a leader so they can be pulled clear of the element.
