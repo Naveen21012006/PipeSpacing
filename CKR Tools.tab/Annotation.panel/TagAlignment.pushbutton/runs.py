@@ -171,3 +171,96 @@ def run_representative(run):
 def representatives(pipes):
     """Return one representative pipe per run for the given selection."""
     return [run_representative(run) for run in group_runs(pipes)]
+
+
+# ---------------------------------------------------------------------------
+# Riser extent (for the plan-view designation tags)
+# ---------------------------------------------------------------------------
+_VERTICAL_MIN = 0.7             # |unit Z| at or above this counts as vertical
+_RISER_XY_TOL = 150.0 / 304.8   # feet (~150 mm): stack drift across reducers
+_RISER_JOG_MAX = 600.0 / 304.8  # feet (~600 mm): off-stack piece walked through
+
+
+def _vertical_direction(pipe):
+    """Return a vertical pipe's unit direction, or None if not vertical."""
+    line = _pipe_line(pipe)
+    if line is None:
+        return None
+    direction = line.Direction.Normalize()
+    return direction if abs(direction.Z) >= _VERTICAL_MIN else None
+
+
+def _same_stack(point, anchor, tol):
+    """True if a point sits over the anchor's plan position (XY only)."""
+    dx = point.X - anchor.X
+    dy = point.Y - anchor.Y
+    return (dx * dx + dy * dy) ** 0.5 <= tol
+
+
+def riser_extent(pipe):
+    """Return (bottom_z, top_z) of the whole riser stack this pipe is part of.
+
+    Walks the connected vertical run across floors, through couplings,
+    fittings AND reducers - unlike group_runs, the size may change, because a
+    riser usually reduces as it climbs. The tagged seed pipe ALWAYS counts, so
+    the extent is never empty. Another segment stays on the stack while it is
+    vertical and sits over the seed's plan position (within _RISER_XY_TOL of
+    either seed endpoint). An off-stack pipe shorter than _RISER_JOG_MAX is an
+    in-run jog (elbow + nipple + elbow around a beam): the walk passes through
+    it without recording it. A longer off-stack pipe is a real takeoff and
+    ends the walk in that direction, so a branch never drags the extent along.
+
+    Args:
+        pipe (Pipe): Any segment of the riser.
+
+    Returns:
+        tuple | None: (bottom_z, top_z) in feet, both always set, or None if
+        the pipe itself is not a vertical segment.
+    """
+    if _vertical_direction(pipe) is None:
+        return None
+    seed_line = _pipe_line(pipe)
+    anchors = (seed_line.GetEndPoint(0), seed_line.GetEndPoint(1))
+
+    def near_stack(point):
+        return (_same_stack(point, anchors[0], _RISER_XY_TOL)
+                or _same_stack(point, anchors[1], _RISER_XY_TOL))
+
+    bottom = None
+    top = None
+    stack = [pipe]
+    seen = set([utils.element_id_value(pipe.Id)])
+
+    while stack:
+        element = stack.pop()
+
+        if isinstance(element, Pipe):
+            line = _pipe_line(element)
+            if line is None:
+                continue
+            # The seed is the tagged pipe - its own extent is ground truth
+            # even when it is a raked offset piece that misses its own
+            # XY tolerance.
+            on_stack = element is pipe or (
+                _vertical_direction(element) is not None
+                and near_stack(line.GetEndPoint(0))
+                and near_stack(line.GetEndPoint(1)))
+            if on_stack:
+                for end in (line.GetEndPoint(0), line.GetEndPoint(1)):
+                    if bottom is None or end.Z < bottom:
+                        bottom = end.Z
+                    if top is None or end.Z > top:
+                        top = end.Z
+            elif line.Length > _RISER_JOG_MAX:
+                continue    # a real takeoff / branch: stop walking this way
+            # else: a short in-run jog - pass through, record nothing
+
+        # On-stack pipes, jogs and fittings/accessories keep the walk going.
+        for neighbour in _neighbours(element):
+            neighbour_id = utils.element_id_value(neighbour.Id)
+            if neighbour_id in seen:
+                continue
+            seen.add(neighbour_id)
+            stack.append(neighbour)
+
+    return (bottom, top)

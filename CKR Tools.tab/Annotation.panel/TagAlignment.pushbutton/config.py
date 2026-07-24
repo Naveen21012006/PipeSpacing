@@ -125,6 +125,97 @@ ELEVATION_TAG_SYSTEMS = ['water']
 
 
 # ---------------------------------------------------------------------------
+# Riser tags: designation by floor and flow (plan views only)
+# ---------------------------------------------------------------------------
+# On a floor plan, a vertical pipe (riser) is tagged by where its run sits
+# relative to the plan's level and which way the system flows:
+#
+#                          flow UP (supply)   flow DOWN (return)
+#   run continues above        T/A                 F/A
+#   run passes through        F/B - T/A           F/A - T/B
+#   run comes from below       F/B                 T/B
+#
+# The run's true extent is walked across floors - through couplings, fittings
+# and REDUCERS (risers shrink as they climb) - so a riser chopped into one
+# segment per storey still reads as one run. Sections and elevations are
+# untouched: this rule only fires in plan views.
+RISER_TAG_ENABLED = True
+
+# The run must extend at least this far (mm) past the plan's level to count
+# as existing below / above that floor.
+RISER_LEVEL_TOLERANCE_MM = 100.0
+
+# Flow direction is NOT read from the system name (a return riser can run up,
+# a supply branch can run down). It comes from the two picks: the risers you
+# click in the "bottom to top" pick flow up, those in the "top to bottom" pick
+# flow down. A vertical pipe you never pick as a riser gets no designation.
+
+# The riser tag is ONE family/type; the designation (F/B, T/A, ...) is not a
+# type but a value the tool WRITES into a text instance parameter on each placed
+# tag, and the family's label shows it (System + that parameter). Per floor is
+# automatic - each plan has its own tag holding its own value.
+#
+# PLACEHOLDER NAMES: set RISER_TAG_TYPE to the riser tag family/type actually
+# loaded in your project, and RISER_DESIGNATION_PARAM to the exact instance
+# parameter that holds the designation. If the tag is not loaded, risers fall
+# back to the normal tag; if the parameter is missing/read-only, the tag places
+# without the designation text (logged).
+RISER_TAG_TYPE = ('ME-Pipe Riser Tag', 'Standard')
+RISER_DESIGNATION_PARAM = 'Riser Designation'
+
+
+# ---------------------------------------------------------------------------
+# Auto Tag Pipes: one method, one tag family, the designation on the pipe
+# ---------------------------------------------------------------------------
+# The "Auto Tag Pipes" method reads each selected pipe's direction and routes
+# it. Every pipe then WRITES its designation into the built-in Comments
+# parameter, and a single tag family (Size + System Abbreviation + Comments)
+# shows it - no per-pipe tag type, no tag parameter. Per storey is automatic:
+# each sliced segment holds its own Comments and its own tag.
+#
+#   horizontal pipe  ->  by centreline height above the plan's floor:
+#                          >= AUTO_HORIZONTAL_THRESHOLD_MM  ->  AUTO_HL
+#                          below it                         ->  AUTO_LL
+#
+#   vertical riser   ->  by which sides of this floor the run reaches
+#                        (walked across storeys) x the flow you pick:
+#
+#                          flow UP (supply)   flow DOWN (return)
+#      run continues above       T/A                F/A
+#      run passes through     F/B - T/A          F/A - T/B
+#      run comes from below       F/B                T/B
+#
+# Change any wording here and every tag follows. Empty separators or blank
+# codes are fine if a project spells them differently.
+AUTO_TAG_ENABLED = True
+
+# Horizontals, by height above the plan's floor.
+AUTO_HORIZONTAL_THRESHOLD_MM = 1500.0
+AUTO_HL = 'AT H/L'          # centreline at or above the threshold
+AUTO_LL = 'AT L/L'          # below the threshold
+
+# Risers, by run extent x flow. Passing-through joins the two codes with
+# AUTO_RISER_THROUGH_SEP.
+AUTO_RISER_THROUGH_SEP = ' - '
+AUTO_RISER_UP_ABOVE = 'T/A'         # up,   run continues above this floor only
+AUTO_RISER_UP_BELOW = 'F/B'         # up,   run comes from below this floor only
+AUTO_RISER_DOWN_ABOVE = 'F/A'       # down, run continues above this floor only
+AUTO_RISER_DOWN_BELOW = 'T/B'       # down, run comes from below this floor only
+
+
+def auto_riser_through(flow_up):
+    """Return the passing-through designation for an up-/down-flow riser."""
+    if flow_up:
+        return AUTO_RISER_UP_BELOW + AUTO_RISER_THROUGH_SEP + AUTO_RISER_UP_ABOVE
+    return AUTO_RISER_DOWN_ABOVE + AUTO_RISER_THROUGH_SEP + AUTO_RISER_DOWN_BELOW
+
+
+# How far apart (paper mm, scaled by view scale) the horizontal block and the
+# riser block sit on the reference line, on top of the normal tag pitch.
+AUTO_BLOCK_GAP_MM = 6.0
+
+
+# ---------------------------------------------------------------------------
 # Tag creation defaults
 # ---------------------------------------------------------------------------
 # Create new tags with a leader so they can be pulled clear of the element.
@@ -185,6 +276,14 @@ HORIZONTAL_LEADER_FREE_END = False
 # raise it for airier stacks, lower it for tighter ones.
 MIN_TAG_PITCH_MM = 4.0
 TAG_GAP_MM = 1.0
+
+# Pitch used ONLY when no tag in the run could be measured (Revit returned no
+# bounding box for any of them). MIN_TAG_PITCH_MM (4 mm) suits a single-line
+# Size tag, but the Auto method's tag is multi-line (Size + System Abbreviation
+# + Comments, ~2-3 lines), so a 4 mm fallback lets those tall tags overprint
+# into an unreadable pile. This taller fallback clears a multi-line label. When
+# measurement DOES work (the normal case) the measured height wins instead.
+FALLBACK_TAG_PITCH_MM = 9.0
 
 # Order a stacked column by the ELEMENTS' left-to-right position rather than
 # by wherever the tags happen to sit: the left-most element's tag goes on top,

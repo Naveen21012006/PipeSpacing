@@ -66,35 +66,41 @@ def pick_reference_line(uidoc, doc):
     return curve
 
 
-def get_selected_elements(uidoc, doc):
-    """Return the elements the user wants to tag.
+def get_preselected_elements(uidoc, doc):
+    """Return the elements already selected when the tool started.
 
-    Uses the active selection when there is one; otherwise prompts for an
-    interactive pick.
+    MUST be read before any interactive pick: starting a PickObject (e.g. the
+    reference-line pick) clears the active selection, so the caller captures
+    this at the very top of the workflow.
 
     Args:
         uidoc: The active UIDocument.
         doc: The active Document.
 
     Returns:
-        list: The selected elements (may be empty if the user cancelled).
+        list: The pre-selected elements (empty when nothing was selected).
     """
     elements = []
-
     for element_id in uidoc.Selection.GetElementIds():
         element = doc.GetElement(element_id)
         if element is not None:
             elements.append(element)
 
-    if elements:
-        utils.logger.debug('Using {} pre-selected element(s).'.format(
-            len(elements)))
-        return elements
+    utils.logger.debug('{} element(s) pre-selected.'.format(len(elements)))
+    return elements
 
-    utils.logger.debug('Nothing pre-selected; prompting interactive pick.')
+
+def prompt_for_elements(message='Select MEP elements to tag and align'):
+    """Prompt an interactive pick of MEP elements to tag.
+
+    Args:
+        message: The status-bar prompt (used to label the direction picks).
+
+    Returns:
+        list: The picked elements (empty if the user picked none / cancelled).
+    """
     try:
-        picked = revit.pick_elements(
-            message='Select MEP elements to tag and align')
+        picked = revit.pick_elements(message=message)
     except Exception as ex:
         utils.logger.debug('Pick cancelled or failed: {}'.format(ex))
         picked = None
