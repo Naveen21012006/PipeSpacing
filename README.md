@@ -1,10 +1,19 @@
 # CKR Tools — pyRevit Extension
 
-A small pyRevit extension of MEP piping tools. It adds a **CKR Tools** ribbon
-tab with a **Piping** panel containing:
+A small pyRevit extension of MEP tools. It adds a **CKR Tools** ribbon
+tab with a **Piping** panel:
 
 - **Pipe Spacing** — re-space parallel pipe runs around a fixed reference.
 - **Pipe Insulation** — auto-apply / update pipe insulation to company standards.
+
+and an **Annotation** panel:
+
+- **Auto Tag** — create missing tags for selected MEP elements, align or
+  distribute the heads, square off the leaders.
+- **Align Tags** — align selected tags / leadered text notes to a picked
+  point: heads stack at a set spacing, leaders become parallel at a set
+  angle. Configurable quadrant, constant landing and intermittent layout;
+  settings persist per user. See `docs/align-tags-test-plan.md`.
 
 ## Requirements
 
