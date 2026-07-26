@@ -1,0 +1,3 @@
+title: Align Tags
+tooltip: "Align tags and leadered text notes to a picked point: heads stack at the set vertical spacing, leaders become parallel at the set angle with straight landing lines. Supports element/material/keynote tags, room/space/area tags and text notes. Configure angle, spacings, constant landing and intermittent (staggered) layout in the dialog."
+author: Naveen

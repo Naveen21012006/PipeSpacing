@@ -1,0 +1,182 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Align Tags"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <StackPanel Margin="14" Width="380">
+
+        <GroupBox Header="Alignment" Padding="6">
+            <UniformGrid Rows="2" Columns="2">
+                <Button x:Name="ModeUL" Tag="UL" Margin="4" Padding="4"
+                        BorderThickness="2" ToolTip="Upper-Left: tags stack above-left, leaders slant down to the elements.">
+                    <StackPanel>
+                        <Canvas Width="44" Height="44">
+                            <Line X1="2" Y1="6" X2="12" Y2="6" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="2" Y1="14" X2="12" Y2="14" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="2" Y1="22" X2="12" Y2="22" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Polyline Points="12,6 22,6 38,22" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="12,14 22,14 38,30" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="12,22 22,22 38,38" Stroke="#5A6068" StrokeThickness="1.5"/>
+                        </Canvas>
+                        <TextBlock Text="Upper-Left" FontSize="10" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ModeUR" Tag="UR" Margin="4" Padding="4"
+                        BorderThickness="2" ToolTip="Upper-Right: tags stack above-right, leaders slant down to the elements.">
+                    <StackPanel>
+                        <Canvas Width="44" Height="44">
+                            <Line X1="30" Y1="6" X2="40" Y2="6" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="30" Y1="14" X2="40" Y2="14" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="30" Y1="22" X2="40" Y2="22" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Polyline Points="30,6 20,6 4,22" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="30,14 20,14 4,30" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="30,22 20,22 4,38" Stroke="#5A6068" StrokeThickness="1.5"/>
+                        </Canvas>
+                        <TextBlock Text="Upper-Right" FontSize="10" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ModeLL" Tag="LL" Margin="4" Padding="4"
+                        BorderThickness="2" ToolTip="Lower-Left: tags stack below-left, leaders slant up to the elements.">
+                    <StackPanel>
+                        <Canvas Width="44" Height="44">
+                            <Line X1="2" Y1="22" X2="12" Y2="22" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="2" Y1="30" X2="12" Y2="30" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="2" Y1="38" X2="12" Y2="38" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Polyline Points="12,22 22,22 38,6" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="12,30 22,30 38,14" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="12,38 22,38 38,22" Stroke="#5A6068" StrokeThickness="1.5"/>
+                        </Canvas>
+                        <TextBlock Text="Lower-Left" FontSize="10" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ModeLR" Tag="LR" Margin="4" Padding="4"
+                        BorderThickness="2" ToolTip="Lower-Right: tags stack below-right, leaders slant up to the elements.">
+                    <StackPanel>
+                        <Canvas Width="44" Height="44">
+                            <Line X1="30" Y1="22" X2="40" Y2="22" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="30" Y1="30" X2="40" Y2="30" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Line X1="30" Y1="38" X2="40" Y2="38" Stroke="#1E5AA0" StrokeThickness="4"/>
+                            <Polyline Points="30,22 20,22 4,6" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="30,30 20,30 4,14" Stroke="#5A6068" StrokeThickness="1.5"/>
+                            <Polyline Points="30,38 20,38 4,22" Stroke="#5A6068" StrokeThickness="1.5"/>
+                        </Canvas>
+                        <TextBlock Text="Lower-Right" FontSize="10" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </UniformGrid>
+        </GroupBox>
+
+        <GroupBox Header="Leader" Padding="6" Margin="0,8,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="44"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Angle (Degrees)" VerticalAlignment="Center"
+                           ToolTip="Slant of the leaders from horizontal. 0 = straight horizontal leaders with no bend (pipe tags); tags whose pipe cannot be reached straight get a small slant automatically."/>
+                <Slider x:Name="AngleSlider" Grid.Row="0" Grid.Column="1"
+                        Minimum="0" Maximum="90" TickFrequency="5"
+                        IsSnapToTickEnabled="False" VerticalAlignment="Center"/>
+                <TextBox x:Name="AngleBox" Grid.Row="0" Grid.Column="2" Margin="6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="0" Grid.Column="3" Text="deg" VerticalAlignment="Center"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Landing Distance" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                <TextBox x:Name="LandingBox" Grid.Row="1" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="LandingUnit" Grid.Row="1" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <CheckBox x:Name="ConstantLandingCheck" Grid.Row="2" Grid.ColumnSpan="4"
+                          Content="Constant Landing" Margin="0,8,0,0"
+                          ToolTip="Every landing line uses exactly the Landing Distance; tag heads follow the leaders instead of forming a straight column. Takes precedence over Intermittent Alignment."/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Header="Spacing" Padding="6" Margin="0,8,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="44"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Vertical Spacing" VerticalAlignment="Center"
+                           ToolTip="Clear gap between stacked tags - the measured tag height is added automatically, so the same gap works at any view scale."/>
+                <TextBox x:Name="VerticalBox" Grid.Row="0" Grid.Column="2" Margin="6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"
+                         ToolTip="Clear gap between stacked tags - the measured tag height is added automatically."/>
+                <TextBlock x:Name="VerticalUnit" Grid.Row="0" Grid.Column="3" Text="mm" VerticalAlignment="Center"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Horizontal Spacing" VerticalAlignment="Center" Margin="0,6,0,0"/>
+                <TextBox x:Name="HorizontalBox" Grid.Row="1" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="HorizontalUnit" Grid.Row="1" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Cluster Distance" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Tags group into PIPE BUNDLES: pipes that run parallel and side-by-side, tagged within this distance ALONG the run, form one stack. Perpendicular pipes never share a stack. 0 = never split."/>
+                <TextBox x:Name="ClusterBox" Grid.Row="2" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"
+                         ToolTip="Max arrow separation along the pipe run within one bundle. 0 = never split."/>
+                <TextBlock x:Name="ClusterUnit" Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <CheckBox x:Name="IntermittentCheck" Grid.Row="3" Grid.ColumnSpan="4"
+                          Content="Intermittent Alignment" Margin="0,8,0,0"
+                          ToolTip="Staggered two-column layout at half the row height, using the Horizontal Spacing as the column offset. Ignored while Constant Landing is on."/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Header="Options" Padding="6" Margin="0,8,0,0">
+            <StackPanel>
+                <CheckBox x:Name="OrderByPipeCheck" Content="Order by pipe position"
+                          ToolTip="Stack reads in drawing order: leftmost pipe = top tag (vertical runs), topmost pipe = top tag (horizontal runs); arrowheads are re-placed on their pipes along the leader line. Needs every selected tag to point at a pipe/duct run."/>
+                <CheckBox x:Name="SwitchSideCheck" Content="Switch Pick Point Side" Margin="0,4,0,0"
+                          ToolTip="Mirror the side of the pick point the tags are placed on."/>
+                <CheckBox x:Name="AttachedEndCheck" Content="Attached End Tags" Margin="0,4,0,0"
+                          ToolTip="Convert Attached leader ends to Free ends pinned on the element so the exact slant angle can be honoured (modifies the arrowhead position). When off, attached-end tags still align, but Revit controls their arrowheads so the slant angle is approximate."/>
+                <CheckBox x:Name="KeepSelectionCheck" Content="Keep Selection After Use" Margin="0,4,0,0"
+                          ToolTip="Restore the tag selection when the command finishes."/>
+                <CheckBox x:Name="SnapsOffCheck" Content="Turn Snaps Off" Margin="0,4,0,0"
+                          ToolTip="Disable object snaps while picking the tag head position."/>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Horizontal Justification (Text Notes only)" Padding="6" Margin="0,8,0,0">
+            <ComboBox x:Name="JustificationCombo"
+                      ToolTip="Applied to selected text notes. Changing justification may move the visible arrowhead position.">
+                <ComboBoxItem Content="Unchanged"/>
+                <ComboBoxItem Content="Left"/>
+                <ComboBoxItem Content="Right"/>
+                <ComboBoxItem Content="Automatic"/>
+            </ComboBox>
+        </GroupBox>
+
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="HelpButton" Grid.Column="0" Content="Help" Width="70" Padding="4"/>
+            <Button x:Name="ProceedButton" Grid.Column="2" Content="Proceed" Width="90" Padding="4"
+                    Margin="0,0,8,0" IsDefault="True" FontWeight="Bold"/>
+            <Button x:Name="CancelButton" Grid.Column="3" Content="Cancel" Width="70" Padding="4"
+                    IsCancel="True"/>
+        </Grid>
+    </StackPanel>
+</Window>
