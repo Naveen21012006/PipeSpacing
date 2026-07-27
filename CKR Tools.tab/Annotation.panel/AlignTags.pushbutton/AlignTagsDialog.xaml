@@ -80,6 +80,7 @@
                     <RowDefinition/>
                     <RowDefinition/>
                     <RowDefinition/>
+                    <RowDefinition/>
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Angle (Degrees)" VerticalAlignment="Center"
                            ToolTip="Slant of the leaders from horizontal. 0 = straight horizontal leaders with no bend (pipe tags); tags whose pipe cannot be reached straight get a small slant automatically."/>
@@ -95,7 +96,13 @@
                          VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
                 <TextBlock x:Name="LandingUnit" Grid.Row="1" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
 
-                <CheckBox x:Name="ConstantLandingCheck" Grid.Row="2" Grid.ColumnSpan="4"
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Elbow&#8211;Arrowhead Dist." VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Clearance kept between an arrowhead and the nearest bend, fitting or pipe end. Also the minimum gap between neighbouring arrowheads when leaders fan onto a short run."/>
+                <TextBox x:Name="ClearanceBox" Grid.Row="2" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="ClearanceUnit" Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <CheckBox x:Name="ConstantLandingCheck" Grid.Row="3" Grid.ColumnSpan="4"
                           Content="Constant Landing" Margin="0,8,0,0"
                           ToolTip="Every landing line uses exactly the Landing Distance; tag heads follow the leaders instead of forming a straight column. Takes precedence over Intermittent Alignment."/>
             </Grid>
@@ -110,6 +117,7 @@
                     <ColumnDefinition Width="44"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
+                    <RowDefinition/>
                     <RowDefinition/>
                     <RowDefinition/>
                     <RowDefinition/>
@@ -134,7 +142,13 @@
                          ToolTip="Max arrow separation along the pipe run within one bundle. 0 = never split."/>
                 <TextBlock x:Name="ClusterUnit" Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
 
-                <CheckBox x:Name="IntermittentCheck" Grid.Row="3" Grid.ColumnSpan="4"
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Rack Width" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="How far apart parallel pipes may sit and still count as one bundle. Widen it for wide racks, narrow it to keep distant parallel runs in separate stacks."/>
+                <TextBox x:Name="RackBox" Grid.Row="3" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="RackUnit" Grid.Row="3" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <CheckBox x:Name="IntermittentCheck" Grid.Row="4" Grid.ColumnSpan="4"
                           Content="Intermittent Alignment" Margin="0,8,0,0"
                           ToolTip="Staggered two-column layout at half the row height, using the Horizontal Spacing as the column offset. Ignored while Constant Landing is on."/>
             </Grid>

@@ -73,6 +73,8 @@ class AlignTagsDialog(forms.WPFWindow):
         self.VerticalUnit.Text = unit
         self.HorizontalUnit.Text = unit
         self.ClusterUnit.Text = unit
+        self.ClearanceUnit.Text = unit
+        self.RackUnit.Text = unit
 
         self.AngleSlider.Value = float(values['angle_deg'])
         self.AngleBox.Text = '{0:g}'.format(round(values['angle_deg'], 1))
@@ -81,6 +83,9 @@ class AlignTagsDialog(forms.WPFWindow):
         self.HorizontalBox.Text = self._format_mm(values['horizontal_mm'])
         self.ClusterBox.Text = self._format_mm(values.get('cluster_mm',
                                                           2000.0))
+        self.ClearanceBox.Text = self._format_mm(values.get('clearance_mm',
+                                                            250.0))
+        self.RackBox.Text = self._format_mm(values.get('rack_mm', 600.0))
 
         self.ConstantLandingCheck.IsChecked = values['constant_landing']
         self.IntermittentCheck.IsChecked = values['intermittent']
@@ -145,6 +150,15 @@ class AlignTagsDialog(forms.WPFWindow):
             self._syncing_angle = False
 
     def _on_help(self, _sender, _args):
+        """Open the bundled help page; fall back to the text summary."""
+        try:
+            import webbrowser
+            path = os.path.join(os.path.dirname(__file__), 'help.html')
+            if os.path.exists(path):
+                webbrowser.open('file:///' + path.replace('\\', '/'))
+                return
+        except Exception as ex:
+            common.logger.debug('Help page failed: {}'.format(ex))
         forms.alert(HELP_TEXT, title='Align Tags - Help')
 
     def _on_cancel(self, _sender, _args):
@@ -195,6 +209,13 @@ class AlignTagsDialog(forms.WPFWindow):
         cluster = self._mm_field(self.ClusterBox, 'Cluster Distance', 0.0)
         if cluster is None:
             return None
+        clearance = self._mm_field(
+            self.ClearanceBox, 'Elbow-Arrowhead Distance', 0.0)
+        if clearance is None:
+            return None
+        rack = self._mm_field(self.RackBox, 'Rack Width', 0.0)
+        if rack is None:
+            return None
 
         return {
             'mode': self._mode,
@@ -203,6 +224,8 @@ class AlignTagsDialog(forms.WPFWindow):
             'landing_mm': landing,
             'horizontal_mm': horizontal,
             'cluster_mm': cluster,
+            'clearance_mm': clearance,
+            'rack_mm': rack,
             'constant_landing': bool(self.ConstantLandingCheck.IsChecked),
             'intermittent': bool(self.IntermittentCheck.IsChecked),
             'order_by_pipe': bool(self.OrderByPipeCheck.IsChecked),

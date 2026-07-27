@@ -53,6 +53,13 @@ uidoc = revit.uidoc
 output = script.get_output()
 file_log = common.get_file_logger()
 
+# pyRevit injects __shiftclick__; guard so the module also imports under
+# plain CPython (tests) and older hosts.
+try:
+    __shiftclick__
+except NameError:
+    __shiftclick__ = False
+
 TITLE = 'Align Tags'
 PICK_PROMPT = 'Pick lowest tag head position. Press Esc to finish.'
 
@@ -60,6 +67,21 @@ PICK_PROMPT = 'Pick lowest tag head position. Press Esc to finish.'
 FITTING_CLEARANCE_MM = 250.0   # arrows keep this far from bends/ends
 CLUSTER_SPAN_CAP_MM = 4000.0   # auto-split chains wider than this
 BUNDLE_LATERAL_MM = 600.0      # rack width: max pipe-to-pipe offset
+
+
+def _length_ft(config, key, default_mm):
+    """A configured length in feet, falling back to the built-in default.
+
+    The dialog exposes these (spec Feature 2, "all settings"), but the
+    tool must still run from a settings file written before they existed.
+    """
+    try:
+        value = float(config.get(key, default_mm))
+    except (TypeError, ValueError):
+        value = default_mm
+    if value < 0.0:
+        value = default_mm
+    return common.mm_to_feet(value)
 
 # `None` is a keyword in Python, so the no-snapping enum member needs getattr.
 _SNAP_NONE = getattr(ObjectSnapTypes, 'None')
@@ -541,7 +563,7 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
         engine.normalize_angle(config['angle_deg']),
         vertical, landing, horizontal, bundle,
         intermittent=config['intermittent'],
-        clearance=common.mm_to_feet(FITTING_CLEARANCE_MM))
+        clearance=_length_ft(config, 'clearance_mm', FITTING_CLEARANCE_MM))
 
 
 _MODE_NAMES = {
@@ -617,7 +639,7 @@ def split_clusters(targets, config, basis):
                   for i in piped]
         for members in clusters.bundle_clusters(
                 pipes, arrows,
-                common.mm_to_feet(BUNDLE_LATERAL_MM),
+                _length_ft(config, 'rack_mm', BUNDLE_LATERAL_MM),
                 common.mm_to_feet(cluster_mm)):
             groups.append([piped[m] for m in members])
     if plain:
@@ -854,14 +876,15 @@ def final_arrangement(records, config, basis):
 
     Detects stack overlaps, leaders through other stacks, and cross-
     cluster leader crossings, then moves the LATER-placed cluster of each
-    conflicting pair until everything clears the 250mm margin. All moves
+    conflicting pair until everything clears the configured Elbow-
+    Arrowhead clearance as a margin. All moves
     commit as ONE assimilated undo step; anything unresolved is reported,
     never hidden.
     """
     placed = [r for r in records if r['anchor'] is not None]
     if len(placed) < 2:
         return
-    margin = common.mm_to_feet(FITTING_CLEARANCE_MM)
+    margin = _length_ft(config, 'clearance_mm', FITTING_CLEARANCE_MM)
 
     plans = {}
     states = []
@@ -1104,10 +1127,22 @@ def main():
         return
 
     loaded = settings.load()
-    config = ui.show_config(doc, loaded)
-    if config is None:
-        return  # cancelled; selection left untouched
-    settings.save(config)
+    if __shiftclick__ or not os.path.exists(settings.SETTINGS_PATH):
+        # Shift+click opens the dialog; a plain click reuses the last
+        # settings (they rarely change between runs). The first ever run
+        # always shows the dialog, so nothing is configured invisibly.
+        config = ui.show_config(doc, loaded)
+        if config is None:
+            return  # cancelled; selection left untouched
+        settings.save(config)
+    else:
+        config = loaded
+        output.print_md(
+            ':gear: Using saved settings (angle {0:g}, {1} mode). '
+            'Shift+click the button to open the dialog.'.format(
+                config['angle_deg'],
+                'order-by-pipe' if config.get('order_by_pipe', True)
+                else 'standard'))
     _config = config
 
     targets, skipped = partition_targets(wrapped)

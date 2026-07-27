@@ -1,0 +1,3 @@
+title: Annotation Dashboard
+tooltip: "Always-on-top palette that applies the leader rules without picking.\n\nProcess Visible: rebuild the leaders of every supported tag in the active view (or just the selection).\nDynamic Tagging: apply the rules automatically to every tag you place from now on.\n\nTags are never moved - each keeps its position and only its leader is rebuilt. Use Align Tags when you want stacks arranged."
+author: Naveen

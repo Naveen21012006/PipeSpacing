@@ -342,6 +342,27 @@ def plan_alignment(anchor, items, mode, angle_deg,
     return results
 
 
+def quadrant_for(head, end):
+    """Return the mode implied by a tag that is ALREADY placed.
+
+    Used by the Annotation Dashboard, which never asks for a pick: each
+    tag keeps its own position and only its leader is rebuilt, so the
+    quadrant must be derived from where the tag sits relative to what it
+    points at. The tag's stack side is the opposite of the element's:
+    an element below-right means the stack is upper-left.
+
+    Args:
+        head: (u, v) the tag head / text position.
+        end: (u, v) the leader end (arrow) on the element.
+
+    Returns:
+        One of MODES.
+    """
+    upper = end[1] <= head[1]      # element below -> stack is upper
+    left = end[0] >= head[0]       # element right -> stack is left
+    return ('U' if upper else 'L') + ('L' if left else 'R')
+
+
 def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                  landing_distance, horizontal_spacing, bundle,
                  intermittent=False, switch_side=False, clearance=None):

@@ -117,6 +117,17 @@ def test_resolve_mode_rejects_unknown():
         engine.resolve_mode('diagonal')
 
 
+def test_quadrant_for_placed_tags():
+    # The stack side is the opposite of the element's side.
+    head = (0.0, 0.0)
+    assert engine.quadrant_for(head, (50.0, -20.0)) == engine.UPPER_LEFT
+    assert engine.quadrant_for(head, (-50.0, -20.0)) == engine.UPPER_RIGHT
+    assert engine.quadrant_for(head, (50.0, 20.0)) == engine.LOWER_LEFT
+    assert engine.quadrant_for(head, (-50.0, 20.0)) == engine.LOWER_RIGHT
+    # Every result is a legal mode, including on exact ties.
+    assert engine.quadrant_for(head, (0.0, 0.0)) in engine.MODES
+
+
 def test_signs_per_mode():
     assert engine.exit_sign(engine.UPPER_LEFT) == 1.0
     assert engine.exit_sign(engine.LOWER_LEFT) == 1.0
@@ -862,3 +873,87 @@ def test_leader_segments_shape():
     entry = {'head': (0, 0), 'elbow': (2, 0), 'end': (4, -2)}
     assert engine.leader_segments(entry) == [((0, 0), (2, 0)),
                                              ((2, 0), (4, -2))]
+
+
+# ---------------------------------------------------------------------------
+# plan_ordered - rare geometric corners
+# ---------------------------------------------------------------------------
+def test_cross_direction_tag_borrows_the_other_shape():
+    # In a vertical bundle, a tag flagged 'cross' (its pipe runs the other
+    # way) must be planned with the HORIZONTAL shape, not the bundle's.
+    items = [{'key': 0, 'pos': 40.0, 'span': (-300.0, 100.0)},
+             {'key': 1, 'pos': 60.0, 'span': (-300.0, 100.0),
+              'cross': True}]
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'v', clearance=1.0)
+    assert len(plan) == 2
+    assert all('end' in p for p in plan)
+
+
+def test_non_overlapping_horizontal_pipes_use_their_union():
+    # Two horizontal pipes that share no station along the run: the fan
+    # must still find a band (their union) instead of collapsing.
+    items = [{'key': 0, 'pos': -20.0, 'span': (0.0, 100.0)},
+             {'key': 1, 'pos': -40.0, 'span': (200.0, 300.0)}]
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=1.0)
+    assert len(plan) == 2
+    ends = [p['end'][0] for p in plan]
+    assert all(math.isfinite(u) for u in ends)
+
+
+def test_fan_clamps_when_the_text_runs_past_the_pipe():
+    # Anchor far along the run: base would land beyond the pipe's far end,
+    # so the fan clamps instead of turning inside out.
+    items = [{'key': 0, 'pos': -20.0, 'span': (0.0, 30.0)},
+             {'key': 1, 'pos': -40.0, 'span': (0.0, 30.0)}]
+    plan = engine.plan_ordered((30.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=2.0)
+    assert len(plan) == 2
+    for p in plan:
+        assert 0.0 <= p['end'][0] <= 30.0      # arrows stay on the pipe
+
+
+def test_fan_clamps_on_the_mirrored_side_too():
+    items = [{'key': 0, 'pos': -20.0, 'span': (0.0, 30.0)},
+             {'key': 1, 'pos': -40.0, 'span': (0.0, 30.0)}]
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_RIGHT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=2.0)
+    assert len(plan) == 2
+    for p in plan:
+        assert 0.0 <= p['end'][0] <= 30.0
+
+
+def test_pipe_with_no_extent_collapses_to_its_middle():
+    # A riser seen end-on in plan has zero length: the band inverts, so
+    # every arrow must land on the single point it does have.
+    items = _v_items([40.0, 60.0], span=(50.0, 50.0))
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'v', clearance=2.0)
+    assert len(plan) == 2
+    for p in plan:
+        assert p['end'][1] == pytest.approx(50.0)
+
+
+def test_short_vertical_run_keeps_a_readable_fan():
+    # The climb fan's spacing floor: a stubby run must not squeeze the
+    # arrows into a sliver.
+    items = _v_items([40.0, 60.0, 80.0], span=(20.0, 46.0))
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'v', clearance=3.0)
+    assert len(plan) == 3
+    arrows = sorted(p['end'][1] for p in plan)
+    assert all(20.0 <= v <= 46.0 for v in arrows)
+    assert len(set(arrows)) > 1          # genuinely fanned, not stacked
+
+
+def test_reversed_pipe_span_is_tolerated():
+    # plan_ordered is a pure function: a caller that hands it curve
+    # endpoints in the order Revit returned them (hi before lo) must still
+    # get arrows on the pipe, not an inverted band.
+    items = _v_items([40.0, 60.0], span=(60.0, 20.0))
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'v', clearance=2.0)
+    assert len(plan) == 2
+    for p in plan:
+        assert p['end'][1] == pytest.approx(40.0)   # collapsed to middle

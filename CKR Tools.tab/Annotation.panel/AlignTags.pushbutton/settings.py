@@ -28,6 +28,8 @@ DEFAULTS = {
     'landing_mm': 1524.0,
     'horizontal_mm': 3048.0,
     'cluster_mm': 2000.0,   # 0 disables auto-splitting
+    'clearance_mm': 250.0,  # arrow-to-bend/end clearance, and fan spacing
+    'rack_mm': 600.0,       # max pipe-to-pipe offset within one bundle
     'switch_side': False,
     'attached_end': False,
     'keep_selection': True,
@@ -36,12 +38,23 @@ DEFAULTS = {
     'intermittent': False,
     'order_by_pipe': True,
     'justification': 'unchanged',   # unchanged | left | right | automatic
+    # Annotation Dashboard (Phase B) - shares this store so both tools
+    # stay consistent; the dashboard writes only these keys.
+    'dash_angle_deg': 0.0,
+    'dash_landing_mm': 1524.0,
+    'dash_elbow_mm': 500.0,
+    'dash_straight': True,
+    'dash_attached_end': False,
+    'dash_dynamic': False,
+    'dash_justification': 'unchanged',
 }
 
 _BOOL_KEYS = ('switch_side', 'attached_end', 'keep_selection', 'snaps_off',
-              'constant_landing', 'intermittent', 'order_by_pipe')
+              'constant_landing', 'intermittent', 'order_by_pipe',
+              'dash_straight', 'dash_attached_end', 'dash_dynamic')
 _FLOAT_KEYS = ('angle_deg', 'vertical_mm', 'landing_mm', 'horizontal_mm',
-               'cluster_mm')
+               'cluster_mm', 'clearance_mm', 'rack_mm', 'dash_angle_deg',
+               'dash_landing_mm', 'dash_elbow_mm')
 _JUSTIFICATIONS = ('unchanged', 'left', 'right', 'automatic')
 
 
@@ -73,9 +86,13 @@ def load():
         values['mode'] = raw['mode']
     if raw.get('justification') in _JUSTIFICATIONS:
         values['justification'] = raw['justification']
+    if raw.get('dash_justification') in _JUSTIFICATIONS:
+        values['dash_justification'] = raw['dash_justification']
 
     # 0 is a legal saved value: it means straight leaders.
     values['angle_deg'] = engine.normalize_angle(values['angle_deg'])
+    values['dash_angle_deg'] = engine.normalize_angle(
+        values['dash_angle_deg'])
     return values
 
 

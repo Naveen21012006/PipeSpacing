@@ -14,10 +14,15 @@ and an **Annotation** panel:
   point: heads stack at a set spacing, leaders become parallel at a set
   angle. Configurable quadrant, constant landing and intermittent layout;
   settings persist per user. See `docs/align-tags-test-plan.md`.
+- **Annotation Dashboard** — an always-on-top palette that applies the same
+  leader rules without picking: **Process Visible** tidies every supported
+  tag in the active view (or just your selection), **Dynamic Tagging**
+  applies them to each new tag as you place it. Tags are never moved — only
+  their leaders are rebuilt.
 
 ## Requirements
 
-- **Autodesk Revit** (works with 2022, 2023, 2024 and 2025; the Insulation tool
+- **Autodesk Revit** (works with 2022 through 2026; the Insulation tool
   targets 2024).
 - **pyRevit** installed — https://github.com/pyrevitlabs/pyRevit/releases
 
@@ -75,5 +80,43 @@ fittings and valves — in the active floor plan, based on company standards.
 
 All insulation standards live in the `INSULATION_STANDARDS` config block at the
 top of that tool's `script.py` — edit there to change the rules.
+
+### Align Tags
+
+Arranges selected tags into tidy stacks with parallel leaders.
+
+1. Select the tags / leadered text notes (or preselect them first).
+2. Click **Align Tags**. The first run opens the settings dialog; after that
+   a plain click reuses your last settings and goes straight to picking —
+   **Shift+click** whenever you want the dialog back.
+3. Pick where the stack should sit. Each pick re-aligns the set and is
+   exactly one undo step. Press **Esc** to finish.
+
+Tags group themselves into *pipe bundles*: only pipes that run parallel,
+sit side by side within the Rack Width, and are tagged at the same station
+along the run share a stack — so a perpendicular pipe never gets dragged
+into someone else's column. With the angle set to 0 the leaders come out
+straight where they can, turn a true 90° onto horizontal runs, and take a
+slight tilt onto vertical ones so a leader is never drawn along its pipe.
+Once every cluster is placed, overlapping stacks and crossing leaders are
+resolved automatically in one further undo step.
+
+Click **Help** in the dialog for the full option reference.
+
+### Annotation Dashboard
+
+The same leader rules, applied without picking anything. The palette stays
+on top and Revit stays usable while it is open.
+
+- **Process Visible** rebuilds the leaders of every supported tag in the
+  active view — or just the current selection, if there is one.
+- **Dynamic Tagging** keeps applying them to each new tag as you place it,
+  until you untick it or close the palette. It always starts off.
+
+Tags are never moved: each keeps the position you gave it and only its
+leader changes. Use Align Tags when you want stacks arranged.
+
+Settings for both tools live in `%APPDATA%\CKR\tag_align_settings.json`, and
+anything that goes wrong is logged to `%APPDATA%\CKR\logs\`.
 
 Author: Naveen

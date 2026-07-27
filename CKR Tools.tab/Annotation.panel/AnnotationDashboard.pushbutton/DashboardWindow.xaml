@@ -1,0 +1,89 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Annotation Dashboard"
+        SizeToContent="Height"
+        Width="340"
+        Topmost="True"
+        ResizeMode="CanMinimize"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="True">
+    <StackPanel Margin="12">
+
+        <GroupBox Header="Leader shape" Padding="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="146"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="58"/>
+                    <ColumnDefinition Width="42"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+
+                <CheckBox x:Name="StraightCheck" Grid.Row="0" Grid.ColumnSpan="4"
+                          Content="Automatic Straight Leaders (No Elbows)"
+                          ToolTip="Prefer straight leaders; a tag that cannot be reached straight gets an L-bend onto a horizontal pipe, or a slight climb onto a vertical one. Same as Angle 0 in Align Tags."/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Angle (Degrees)" VerticalAlignment="Center" Margin="0,8,0,0"
+                           ToolTip="Slant used when Automatic Straight Leaders is off."/>
+                <Slider x:Name="AngleSlider" Grid.Row="1" Grid.Column="1" Margin="0,8,0,0"
+                        Minimum="0" Maximum="90" TickFrequency="5" VerticalAlignment="Center"/>
+                <TextBox x:Name="AngleBox" Grid.Row="1" Grid.Column="2" Margin="6,8,6,0"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="1" Grid.Column="3" Text="deg" VerticalAlignment="Center" Margin="0,8,0,0"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Landing Distance" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Horizontal run from the text before the leader turns."/>
+                <TextBox x:Name="LandingBox" Grid.Row="2" Grid.Column="2" Margin="6,6,6,0"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="LandingUnit" Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Elbow&#8211;Arrowhead Dist." VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Minimum distance kept between the bend and the arrowhead, so short leaders stay legible."/>
+                <TextBox x:Name="ElbowBox" Grid.Row="3" Grid.Column="2" Margin="6,6,6,0"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock x:Name="ElbowUnit" Grid.Row="3" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+            </Grid>
+        </GroupBox>
+
+        <GroupBox Header="Behaviour" Padding="6" Margin="0,8,0,0">
+            <StackPanel>
+                <CheckBox x:Name="DynamicCheck" Content="Dynamic Tagging: modify new tag leaders"
+                          ToolTip="While ticked, every newly placed tag gets these leader rules applied automatically."/>
+                <CheckBox x:Name="AttachedCheck" Content="Attached End Tags (may move arrowheads)" Margin="0,6,0,0"
+                          ToolTip="Free attached arrowheads and pin them so the geometry is exact; the arrow may shift slightly and no longer follows the element."/>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Header="Horizontal Justification (Text Notes only)" Padding="6" Margin="0,8,0,0">
+            <ComboBox x:Name="JustificationCombo"
+                      ToolTip="Applied to text notes. Changing justification may move the visible arrowhead.">
+                <ComboBoxItem Content="Unchanged"/>
+                <ComboBoxItem Content="Left"/>
+                <ComboBoxItem Content="Right"/>
+                <ComboBoxItem Content="Automatic"/>
+            </ComboBox>
+        </GroupBox>
+
+        <TextBlock x:Name="StatusText" Margin="2,10,2,0" TextWrapping="Wrap"
+                   Foreground="#5B6472" Text="Ready."/>
+
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="ProcessButton" Grid.Column="0" Content="Process Visible"
+                    Padding="6,4" FontWeight="Bold" Margin="0,0,8,0"/>
+            <Button x:Name="HelpButton" Grid.Column="1" Content="Help" Width="56" Padding="4"/>
+            <Button x:Name="MinimiseButton" Grid.Column="2" Content="Minimise" Width="70" Padding="4" Margin="6,0,0,0"/>
+            <Button x:Name="CloseButton" Grid.Column="3" Content="Close" Width="56" Padding="4" Margin="6,0,0,0"/>
+        </Grid>
+    </StackPanel>
+</Window>
