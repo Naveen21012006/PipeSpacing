@@ -151,10 +151,3 @@ def test_caps_disabled_when_distance_off():
     # the caps must not override it.
     points = [(i * 1.0, 0.0) for i in range(15)]
     assert clusters.chain_clusters(points, 0.0) == [list(range(15))]
-
-
-def test_bundle_with_no_pipes_is_empty():
-    # Every tag in the pick was a non-pipe annotation: the bundle pass has
-    # nothing to group and must hand back an empty list, not one empty
-    # cluster (which would place a stack with no tags in it).
-    assert clusters.bundle_clusters([], [], 2.0, 6.0) == []

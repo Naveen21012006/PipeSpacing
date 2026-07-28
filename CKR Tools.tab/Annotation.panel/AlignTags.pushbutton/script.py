@@ -53,13 +53,6 @@ uidoc = revit.uidoc
 output = script.get_output()
 file_log = common.get_file_logger()
 
-# pyRevit injects __shiftclick__; guard so the module also imports under
-# plain CPython (tests) and older hosts.
-try:
-    __shiftclick__
-except NameError:
-    __shiftclick__ = False
-
 TITLE = 'Align Tags'
 PICK_PROMPT = 'Pick lowest tag head position. Press Esc to finish.'
 
@@ -67,55 +60,6 @@ PICK_PROMPT = 'Pick lowest tag head position. Press Esc to finish.'
 FITTING_CLEARANCE_MM = 250.0   # arrows keep this far from bends/ends
 CLUSTER_SPAN_CAP_MM = 4000.0   # auto-split chains wider than this
 BUNDLE_LATERAL_MM = 600.0      # rack width: max pipe-to-pipe offset
-
-
-_CHAR_WIDTH_FACTOR = 0.6   # mean glyph width as a fraction of text height
-
-
-def _text_width_hint(wrapper, view):
-    """Independent estimate of a tag's text width, in feet, or None.
-
-    Diagnostic only. Derived from the tag's OWN text and its type's text
-    size, so a leader that survives suppression cannot contaminate it -
-    unlike the bounding box, which does on every tag in the user's
-    project. Returns None when the family does not expose what it needs.
-    """
-    try:
-        element = wrapper.element
-        if wrapper.kind == 'textnote':
-            return float(element.Width)      # exact, already model units
-        text = getattr(element, 'TagText', None)
-        if not text:
-            return None
-        longest = max(len(line) for line in (text.splitlines() or [text]))
-        symbol = getattr(element, 'Symbol', None)
-        if symbol is None:
-            return None
-        from Autodesk.Revit.DB import BuiltInParameter
-        param = symbol.get_Parameter(BuiltInParameter.TEXT_SIZE)
-        if param is None:
-            return None
-        size_ft = float(param.AsDouble())    # paper units
-        scale = float(getattr(view, 'Scale', 1) or 1)
-        return longest * size_ft * _CHAR_WIDTH_FACTOR * scale
-    except Exception as ex:
-        common.logger.debug('Text width hint failed: {}'.format(ex))
-        return None
-
-
-def _length_ft(config, key, default_mm):
-    """A configured length in feet, falling back to the built-in default.
-
-    The dialog exposes these (spec Feature 2, "all settings"), but the
-    tool must still run from a settings file written before they existed.
-    """
-    try:
-        value = float(config.get(key, default_mm))
-    except (TypeError, ValueError):
-        value = default_mm
-    if value < 0.0:
-        value = default_mm
-    return common.mm_to_feet(value)
 
 # `None` is a keyword in Python, so the no-snapping enum member needs getattr.
 _SNAP_NONE = getattr(ObjectSnapTypes, 'None')
@@ -452,29 +396,16 @@ def measure_layout(targets, basis):
                 # distance per axis - a surviving leader inflates ONE
                 # side only. Cap and log when the raw bbox disagrees.
                 if wrapper.kind in ('tag', 'spatial'):
-                    raw_w = u_hi - u_lo
                     sym_w = 2.0 * min(head2d[0] - u_lo, u_hi - head2d[0])
-                    capped = sym_w > 0.0 and raw_w > 1.5 * sym_w
-                    if capped:
+                    if sym_w > 0.0 and (u_hi - u_lo) > 1.5 * sym_w:
+                        file_log.info(
+                            'Tag %s: width %.0fmm capped to %.0fmm '
+                            '(leader survived suppression).',
+                            wrapper.id_value,
+                            common.feet_to_mm(u_hi - u_lo),
+                            common.feet_to_mm(sym_w))
                         u_lo = head2d[0] - sym_w / 2.0
                         u_hi = head2d[0] + sym_w / 2.0
-                    # Three-way comparison so the next Revit run tells us
-                    # whether the estimate can be trusted: the bbox is
-                    # leader-contaminated on every tag in the user's
-                    # project, so the estimate is doing load-bearing work
-                    # and the text-derived figure is the only independent
-                    # check on it.
-                    hint = _text_width_hint(wrapper, doc.ActiveView)
-                    file_log.info(
-                        'Tag %s width: bbox %.0fmm, estimate %.0fmm, '
-                        'text %s -> used %.0fmm%s.',
-                        wrapper.id_value,
-                        common.feet_to_mm(raw_w),
-                        common.feet_to_mm(sym_w) if sym_w > 0.0 else 0.0,
-                        '{0:.0f}mm'.format(common.feet_to_mm(hint))
-                        if hint else 'n/a',
-                        common.feet_to_mm(u_hi - u_lo),
-                        ' (leader survived suppression)' if capped else '')
                     sym_h = 2.0 * min(head2d[1] - v_lo, v_hi - head2d[1])
                     if sym_h > 0.0 and (v_hi - v_lo) > 1.5 * sym_h:
                         v_lo = head2d[1] - sym_h / 2.0
@@ -610,40 +541,7 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
         engine.normalize_angle(config['angle_deg']),
         vertical, landing, horizontal, bundle,
         intermittent=config['intermittent'],
-        clearance=_length_ft(config, 'clearance_mm', FITTING_CLEARANCE_MM))
-
-
-def _broken_count(plan):
-    return sum(1 for entry in plan if not entry['angle_ok'])
-
-
-def nudge_clear(anchor2d, base_items, targets, mode, bundle, config,
-                vertical, landing, horizontal, plan):
-    """Slide the stack away from the pipes until the text clears them.
-
-    A pick within half a text width of a pipe cannot be honoured as
-    clicked - the text itself would sit on the pipe. The tool used to
-    refuse such picks, which left tags piled on each other with no way
-    forward and no clue how much further to click (user, 2026-07-28: 43
-    refusals in one session). The click is now a HINT: the stack moves
-    the shortest distance that makes it legal, and the move is reported.
-
-    Returns:
-        (plan, anchor2d, moved_ft) - moved_ft is 0.0 when nothing moved.
-    """
-    needs = [float(entry.get('shortfall', 0.0)) for entry in plan]
-    need = max(needs) if needs else 0.0
-    if need <= 0.0:
-        return plan, anchor2d, 0.0
-
-    moved = need + _length_ft(config, 'clearance_mm', FITTING_CLEARANCE_MM)
-    # Leaders exit towards +sign, so the pipes are that way: retreat.
-    shifted = (anchor2d[0] - engine.exit_sign(mode) * moved, anchor2d[1])
-    retry = ordered_plan(shifted, base_items, targets, mode, bundle,
-                         config, vertical, landing, horizontal)
-    if not retry or _broken_count(retry) >= _broken_count(plan):
-        return plan, anchor2d, 0.0   # moving did not help: leave the pick
-    return retry, shifted, moved
+        clearance=common.mm_to_feet(FITTING_CLEARANCE_MM))
 
 
 _MODE_NAMES = {
@@ -719,7 +617,7 @@ def split_clusters(targets, config, basis):
                   for i in piped]
         for members in clusters.bundle_clusters(
                 pipes, arrows,
-                _length_ft(config, 'rack_mm', BUNDLE_LATERAL_MM),
+                common.mm_to_feet(BUNDLE_LATERAL_MM),
                 common.mm_to_feet(cluster_mm)):
             groups.append([piped[m] for m in members])
     if plain:
@@ -956,15 +854,14 @@ def final_arrangement(records, config, basis):
 
     Detects stack overlaps, leaders through other stacks, and cross-
     cluster leader crossings, then moves the LATER-placed cluster of each
-    conflicting pair until everything clears the configured Elbow-
-    Arrowhead clearance as a margin. All moves
+    conflicting pair until everything clears the 250mm margin. All moves
     commit as ONE assimilated undo step; anything unresolved is reported,
     never hidden.
     """
     placed = [r for r in records if r['anchor'] is not None]
     if len(placed) < 2:
         return
-    margin = _length_ft(config, 'clearance_mm', FITTING_CLEARANCE_MM)
+    margin = common.mm_to_feet(FITTING_CLEARANCE_MM)
 
     plans = {}
     states = []
@@ -1088,20 +985,6 @@ def align_set(targets, config, basis, gap, justification, prompt):
                         'pick - the configured {1} put every pipe behind '
                         'the stack.'.format(_MODE_NAMES[mirrored],
                                             _MODE_NAMES[effective]))
-                    effective = mirrored
-
-            # The click is a hint: if the text would sit on a pipe, back
-            # the stack off instead of refusing the pick.
-            plan, anchor2d, moved = nudge_clear(
-                anchor2d, base_items, targets, effective, bundle, config,
-                vertical, landing, horizontal, plan)
-            if moved > 0.0:
-                output.print_md(
-                    ':left_right_arrow: Stack moved **{0:.0f} mm** back '
-                    'from the pipes - the text would not fit where you '
-                    'clicked.'.format(common.feet_to_mm(moved)))
-                file_log.info('Anchor nudged %.0fmm clear of the pipes.',
-                              common.feet_to_mm(moved))
         else:
             plan = engine.plan_alignment(
                 anchor2d, items,
@@ -1131,15 +1014,25 @@ def align_set(targets, config, basis, gap, justification, prompt):
                             _MODE_NAMES[detected],
                             _MODE_NAMES[effective]))
 
-        # A pick is never refused for geometry any more (user decision,
-        # 2026-07-29): nudge_clear has already bought whatever room it
-        # could, and a tag placed imperfectly still beats a tag left
-        # buried under four others. Anything still flagged is reported.
+        # Never commit a mostly-broken ordered plan: if even the mirrored
+        # orientation leaves most tags unable to reach their pipe (their
+        # text would cross it), skip this pick and keep what's there.
         if ordered is not None and plan:
-            broken = _broken_count(plan)
-            if broken:
-                file_log.info('Placed with %s/%s leader(s) still flagged.',
-                              broken, len(plan))
+            broken = sum(1 for entry in plan if not entry['angle_ok'])
+            if broken * 2 > len(plan):
+                boxes = [getattr(w, 'bbox2d', None) for w in targets]
+                widths = [b[1] - b[0] for b in boxes if b]
+                width_mm = common.feet_to_mm(max(widths)) if widths else 0.0
+                output.print_md(
+                    ':warning: Pick skipped - {0} of {1} tag(s) cannot '
+                    'reach their pipe from there (measured text width '
+                    '~{2:.0f} mm would sit on or past the pipe). Click '
+                    'further from the pipes; the previous alignment is '
+                    'untouched.'.format(broken, len(plan), width_mm))
+                file_log.info(
+                    'Pick skipped: %s/%s broken; max text width %.0fmm.',
+                    broken, len(plan), width_mm)
+                continue
 
         group = TransactionGroup(doc, TITLE)
         group.Start()
@@ -1211,22 +1104,10 @@ def main():
         return
 
     loaded = settings.load()
-    if __shiftclick__ or not os.path.exists(settings.SETTINGS_PATH):
-        # Shift+click opens the dialog; a plain click reuses the last
-        # settings (they rarely change between runs). The first ever run
-        # always shows the dialog, so nothing is configured invisibly.
-        config = ui.show_config(doc, loaded)
-        if config is None:
-            return  # cancelled; selection left untouched
-        settings.save(config)
-    else:
-        config = loaded
-        output.print_md(
-            ':gear: Using saved settings (angle {0:g}, {1} mode). '
-            'Shift+click the button to open the dialog.'.format(
-                config['angle_deg'],
-                'order-by-pipe' if config.get('order_by_pipe', True)
-                else 'standard'))
+    config = ui.show_config(doc, loaded)
+    if config is None:
+        return  # cancelled; selection left untouched
+    settings.save(config)
     _config = config
 
     targets, skipped = partition_targets(wrapped)

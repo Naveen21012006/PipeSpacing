@@ -64,10 +64,6 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | A47 | Auto snapshot | Any run with picks | `%APPDATA%\CKR\logs\align_check*.png` holds the drawn result for review without screenshots |
 | A48 | Mid-span bends on long runs | Angle 0, tag a LONG horizontal run, pick at its middle | Landing + 90°-style tilted bend appear right at the pick (no "Pick skipped"); corner stubs behave exactly as before |
 | A36 | Re-align refreshes elbows | Align, then re-align the same tags to a new spot; select one | Elbow bubble sits at the NEW midpoint (not the old one); dragging the tag toward the pipe works freely |
-| A49 | **Close pick is nudged, never refused** | Pick deliberately close to a pipe — within about half a tag's text width | The stack IS placed, backed off just far enough that the text clears the pipe; output says "Stack moved N mm back from the pipes". **No "Pick skipped"** — a pick is never refused for geometry |
-| A50 | Nudge keeps the pick's intent | Pick close to a pipe, note where you clicked | The stack moves straight back from the pipes only — same row, same side, minimum distance. It does not jump to the other side |
-| A51 | Far side still mirrors | Pick on the far side of the pipes from the tags | Quadrant mirrors (message shown) instead of nudging — the two corrections don't fight |
-| A52 | Single-tag clusters place | Set Cluster Distance small so tags split into 1-tag clusters, then pick for each | Every cluster places. This is the 2026-07-28 regression: one tag used to be refused on any imperfection because `broken*2 > 1` |
 
 ## Dialog + persistence
 
@@ -80,40 +76,8 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | B5 | Project units | Open dialog in a project set to inches | Fields show inch values with the right unit label; typed values round-trip |
 | B6 | Persistence | Change several settings, Proceed, close Revit, reopen dialog | All values restored (`%APPDATA%\CKR\tag_align_settings.json` exists) |
 | B7 | Corrupt settings | Put garbage in the JSON file, start tool | Tool starts with defaults, no error |
-| B8 | Help | Click Help | The bundled help page opens in the browser; if it can't, the text summary appears instead |
+| B8 | Help | Click Help | Help text appears |
 | B9 | Cancel | Click Cancel / press Esc in dialog | Nothing modified, no pick prompt |
-| B10 | Skip the dialog | Run the tool once and Proceed; run it again with a plain click | Second run goes straight to picking, output says "Using saved settings"; **Shift+click** opens the dialog again |
-| B11 | First ever run | Delete the settings file, plain-click the button | Dialog still opens (never picks with unseen settings) |
-| B12 | Elbow–Arrowhead Distance | Set it to 0, align onto a short pipe; then set 250 mm and repeat | At 0 arrows may sit on fittings/ends; at 250 mm they keep clear, and fanned arrowheads sit at least that far apart |
-| B13 | Rack Width | Two parallel pipes ~800 mm apart: align with Rack Width 600, then 1000 | At 600 they form two stacks, at 1000 a single stack |
-| B14 | Old settings file | Keep a settings file written before these two fields existed | Tool starts, uses 250 mm / 600 mm defaults, no error |
-
-## Annotation Dashboard (Feature 3)
-
-| # | Spec item | Steps | Pass when |
-|---|-----------|-------|-----------|
-| C1 | Modeless palette | Click **Annotation Dashboard** | Palette opens on top and Revit stays usable — you can pan, zoom, select and run other commands with it open |
-| C2 | Process Visible | Open a view with untidy tags, nothing selected, click **Process Visible** | Every supported tag in the view gets the rule leader; status line reports the count; ONE Ctrl+Z reverts the lot |
-| C3 | Selection wins | Select three tags, click **Process Visible** | Only those three change |
-| C4 | Nothing to do | Empty view, click **Process Visible** | Status says "Nothing to process." — no error, no empty transaction |
-| C5 | Tags never move | Note a tag's head position, Process Visible | The head is exactly where it was; only the leader changed |
-| C6 | Straight leaders | Straight ticked, process a view with level, horizontal-run and vertical-run tags | Level ones straight, horizontal runs get a true 90° L, vertical runs get the slight tilt (never drawn along the pipe) |
-| C7 | Slanted mode | Untick Straight, set 45°, Process Visible | Leaders land then slant; the bend keeps the Elbow–Arrowhead distance from the arrow |
-| C8 | Dynamic Tagging | Tick **Dynamic Tagging**, place several tags by hand | Each new tag's leader is rebuilt as it lands; the palette's status updates |
-| C9 | Dynamic, fast placement | With Dynamic on, place tags quickly one after another | None are skipped — every tag placed gets its leader (the queue accumulates, it doesn't overwrite) |
-| C10 | No feedback loop | With Dynamic on, watch the status while it works | The tool's own edits don't retrigger it; no runaway loop, Revit stays responsive |
-| C11 | Dynamic off | Untick Dynamic, place a tag | The tag is left exactly as Revit placed it |
-| C12 | Second document | With Dynamic on, switch to another open project and place a tag there | Nothing is rewritten in the wrong document; the log notes queued tags that were dropped |
-| C13 | Close unhooks | Tick Dynamic, close the palette, place a tag | Nothing happens — the watcher is gone, no error |
-| C14 | Minimise / restore | Click **Minimise**, then restore from the taskbar | Palette returns with its settings intact |
-| C15 | Justification | Set **Automatic**, Process Visible on text notes either side of their elements | Each note justifies towards its own element (right when its element is to the right, left when to the left) |
-| C16 | Units | Open in an imperial project | Landing / Elbow fields show inches with the right label |
-| C17 | Settings shared | Change dashboard values, close, reopen | Values restored; Align Tags' own settings are untouched |
-| C18 | Dynamic never auto-arms | Tick Dynamic, close the palette, reopen it | Dynamic starts UNTICKED every time (it is never silently live) |
-| C19 | **Palette survives its own command** | Open the palette, wait a few seconds, then click ANY control (Dynamic, Help, the slider, Close) | It responds normally. **Revit must not crash.** This is the `__persistentengine__` regression — before that flag, the first click after the command returned killed Revit with an unrecoverable error |
-| C20 | One palette only | With the palette open, click the ribbon button again | The existing palette comes to the front — no second copy. Minimise it first and repeat: the button restores it |
-| C21 | Reopen after close | Close the palette, click the button again | A fresh palette opens with the saved settings |
-| C22 | No double-tagging after reopen | Tick Dynamic, close the palette, reopen, tick Dynamic, place one tag | The tag's leader is rebuilt ONCE (no orphaned watcher from the first palette) |
 
 ## Quality gates (spot checks)
 
@@ -122,9 +86,6 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | Q1 | No unhandled exceptions | Try hostile inputs (empty view, cancel everything, weird units) — never a Revit error dialog with a stack trace |
 | Q2 | Errors logged | Force an error (e.g. read-only settings folder) — `%APPDATA%\CKR\logs\align_tags.log` records it |
 | Q3 | Transactions | Steps A5–A7 above prove pick = transaction = undo step |
-| Q4 | Dashboard exceptions | Every dashboard button/checkbox is exception-guarded: a failure shows "see the CKR log" in the status line, never a Revit stack trace (the palette outlives the script, so nothing else can catch it) |
-| Q5 | Rolled-back commits | If Revit resolves a warning by rolling the change back, the status says so — the tool never reports success for changes that didn't land |
-| Q6 | Geometry coverage | `python -m pytest --cov=engine --cov=clusters --cov=arrange --cov-branch` — 100% branch coverage on all three pure modules (gate is 90%) |
 
 ### Notes / known interpretation choices (flag anything that feels wrong)
 
@@ -155,13 +116,6 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
    on the pipes (free ends moved; attached ends steered by elbow, or
    freed+pinned when "Attached End Tags" is on).
 
-8. **The Dashboard never moves a tag.** It rebuilds leaders only — each tag
-   keeps the position you gave it. Use Align Tags when you want stacks
-   arranged; use the Dashboard to tidy leaders in bulk or as you tag.
-9. **Dynamic Tagging is per session, never remembered as ON.** The palette
-   opens with it unticked even if it was on when you closed it, so reopening
-   the tool can never silently start rewriting tags behind you.
-10. **Automatic justification differs between the two tools by design.**
-    Align Tags derives it from the stack quadrant (one direction for the
-    whole stack); the Dashboard has no stack, so it judges each tag on its
-    own — justified towards the element that tag points at.
+## Phase B (deferred): Annotation Dashboard, Dynamic Tagging, help HTML
+
+Test plan lands with Phase B.

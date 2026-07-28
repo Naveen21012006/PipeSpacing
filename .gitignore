@@ -13,5 +13,3 @@ Thumbs.db
 
 # Test artifacts
 .coverage
-coverage.json
-.pytest_cache/
