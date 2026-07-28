@@ -5,6 +5,8 @@ tab with a **Piping** panel:
 
 - **Pipe Spacing** — re-space parallel pipe runs around a fixed reference.
 - **Pipe Insulation** — auto-apply / update pipe insulation to company standards.
+- **Level Adjustment** — find the piping in a plan view that belongs to
+  another level, and leave only that on screen.
 
 and an **Annotation** panel:
 
@@ -80,6 +82,54 @@ fittings and valves — in the active floor plan, based on company standards.
 
 All insulation standards live in the `INSULATION_STANDARDS` config block at the
 top of that tool's `script.py` — edit there to change the rules.
+
+### Level Adjustment
+
+A read-only QA check: which piping drawn in this plan actually belongs to
+another level?
+
+1. Open the plan view you want to check (floor, MEP/engineering or ceiling
+   plan — anything with an associated level).
+2. Click **Level Adjustment** to check the view.
+3. Review what is left on screen, then press **Esc** to restore it — or click
+   an element to keep the isolation and carry on working.
+
+Every visible **pipe, flex pipe, fitting and valve** is compared with the
+view's level. The ones that match are hidden with Temporary Hide/Isolate —
+along with any insulation they host, so nothing is left floating — and what
+remains on screen is the review list. The rest of the model stays visible as
+context.
+
+Fittings and valves are family instances, and the parameter holding their
+level differs from family to family. So the level is resolved in two passes:
+the element's own level parameters first, and failing those, the level of the
+run it connects to — a valve with no level of its own belongs to its pipes.
+Only a genuinely orphaned element is reported as unverified, which counts as
+an issue too and stays on screen. A fitting joining two levels is credited to
+the view's level when it touches it, so riser transitions are not reported as
+defects.
+
+After the summary, the view is held open for review. **Esc** restores it —
+Revit is in a command state at that point, so Esc cancels exactly as it does
+for any other tool, and zooming and panning work throughout. Clicking an
+element instead ends the review with the isolation left in place and that
+element selected, ready to have its level corrected.
+
+The button toggles as well, so you never need the eyeglasses icon on the view
+control bar: click it again on a view it isolated and what it hid comes back;
+click once more and the view is checked afresh. Each view remembers its own
+state for the Revit session. An isolate that came from somewhere else is
+cleared before scanning instead, so the count is always taken against the
+full view.
+
+Nothing is modified — no parameter is written, only the view state.
+
+The summary breaks the results down by category; the output window adds a
+full table and lists the offending elements grouped by the level they
+actually belong to, each group with a **Select** link.
+
+Phase 1 covers piping in the host model. Ducts, cable trays, conduits and
+linked models are not checked.
 
 ### Align Tags
 

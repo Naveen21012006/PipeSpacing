@@ -1,0 +1,3 @@
+title: Level Adjustment
+tooltip: "QA check for the active plan view: compares every visible pipe, flex pipe, fitting and valve against the view's level, then temporarily hides the correct ones (and their insulation), leaving only the cross-level elements on screen. Click again to restore the view. Nothing in the model is modified."
+author: Naveen
