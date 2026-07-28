@@ -106,6 +106,10 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | C16 | Units | Open in an imperial project | Landing / Elbow fields show inches with the right label |
 | C17 | Settings shared | Change dashboard values, close, reopen | Values restored; Align Tags' own settings are untouched |
 | C18 | Dynamic never auto-arms | Tick Dynamic, close the palette, reopen it | Dynamic starts UNTICKED every time (it is never silently live) |
+| C19 | **Palette survives its own command** | Open the palette, wait a few seconds, then click ANY control (Dynamic, Help, the slider, Close) | It responds normally. **Revit must not crash.** This is the `__persistentengine__` regression — before that flag, the first click after the command returned killed Revit with an unrecoverable error |
+| C20 | One palette only | With the palette open, click the ribbon button again | The existing palette comes to the front — no second copy. Minimise it first and repeat: the button restores it |
+| C21 | Reopen after close | Close the palette, click the button again | A fresh palette opens with the saved settings |
+| C22 | No double-tagging after reopen | Tick Dynamic, close the palette, reopen, tick Dynamic, place one tag | The tag's leader is rebuilt ONCE (no orphaned watcher from the first palette) |
 
 ## Quality gates (spot checks)
 

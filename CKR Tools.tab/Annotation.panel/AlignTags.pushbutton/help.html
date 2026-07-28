@@ -94,6 +94,7 @@
   <tr><td>Minimise / Close</td><td>Close also unhooks Dynamic Tagging.</td></tr>
 </table>
 <p>Dynamic Tagging always opens <b>off</b>, even if it was on when you last closed the palette — reopening the tool can never silently start rewriting tags behind you.</p>
+<p>Only one palette exists at a time: pressing the button again brings the open one forward (restoring it if minimised) rather than opening a second. <b>Close the palette before running pyRevit → Reload</b>, so no leftover Dynamic Tagging hook is left pointing at a reloaded engine.</p>
 <p><b>Note:</b> tags are never moved by the Dashboard — each keeps its position, only its leader is rebuilt. Use Align Tags when you want stacks arranged.</p>
 
 <h2>Reporting and troubleshooting</h2>

@@ -18,6 +18,13 @@ changes the handler itself makes.
 Shares AlignTags' modules (engine, wrappers, common, settings) and its
 settings file, so both tools stay consistent.
 
+REQUIRES A PERSISTENT ENGINE (see __persistentengine__ below). pyRevit
+disposes a command's IronPython engine as soon as the command returns.
+A modeless window outlives its command, so its handlers - which are
+Python delegates - would be calling into a dead engine: Revit dies with
+an unrecoverable 0xe0434352 the moment anything is clicked, and no
+try/except can catch it because the failure is below the Python frame.
+
 Author: Naveen
 Target: Revit 2022-2026 / pyRevit / IronPython
 """
@@ -25,6 +32,10 @@ Target: Revit 2022-2026 / pyRevit / IronPython
 import os
 import sys
 import traceback
+
+# Keep this command's engine alive after it returns - without it the
+# palette crashes Revit on the first click (field-confirmed 2026-07-28).
+__persistentengine__ = True
 
 _BUNDLE_DIR = os.path.dirname(__file__)
 _ALIGN_DIR = os.path.join(os.path.dirname(_BUNDLE_DIR),
@@ -242,10 +253,6 @@ class _RuleHandler(IExternalEventHandler):
                 pass
 
 
-_HANDLER = _RuleHandler()
-_EVENT = ExternalEvent.Create(_HANDLER)
-
-
 # ---------------------------------------------------------------------------
 # Dynamic tagging
 # ---------------------------------------------------------------------------
@@ -304,7 +311,30 @@ class _DynamicWatcher(object):
             common.logger.debug('DocumentChanged failed: {}'.format(ex))
 
 
-_WATCHER = _DynamicWatcher(_HANDLER, _EVENT)
+# ---------------------------------------------------------------------------
+# Session state
+# ---------------------------------------------------------------------------
+# A persistent engine re-runs this script on every button press, so the
+# handler/event/watcher must be built ONCE and reused. Module globals are
+# rebound on each run, which would leak an ExternalEvent per press and
+# orphan the previous DocumentChanged hook - the old palette would then
+# stop the wrong watcher on close and keep rewriting tags forever.
+# pyRevit's env vars live in the AppDomain, so they outlive both.
+_ENV_KEY = 'CKRAnnotationDashboard'
+
+
+def _session():
+    """The one handler/event/watcher trio for this Revit session."""
+    state = script.get_envvar(_ENV_KEY)
+    if state is None:
+        handler = _RuleHandler()
+        event = ExternalEvent.Create(handler)
+        state = {'handler': handler,
+                 'event': event,
+                 'watcher': _DynamicWatcher(handler, event),
+                 'window': None}
+        script.set_envvar(_ENV_KEY, state)
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -313,13 +343,20 @@ _WATCHER = _DynamicWatcher(_HANDLER, _EVENT)
 class DashboardWindow(forms.WPFWindow):
     """The modeless palette. Owns no document logic - only settings."""
 
-    def __init__(self):
+    def __init__(self, state):
         xaml = os.path.join(_BUNDLE_DIR, 'DashboardWindow.xaml')
         forms.WPFWindow.__init__(self, xaml)
+        # Held per instance, never read from module globals: a second run
+        # of this script rebinds those, and this window must keep talking
+        # to the trio it was built with.
+        self._state = state
+        self._handler = state['handler']
+        self._event = state['event']
+        self._watcher = state['watcher']
         self._syncing = False
         self._load(settings.load())
         self._wire()
-        _HANDLER.window = self
+        self._handler.window = self
         self.push_options()
 
     # -- setup ----------------------------------------------------------
@@ -375,7 +412,7 @@ class DashboardWindow(forms.WPFWindow):
         elbow_mm = self._mm(self.ElbowBox, 500.0)
         just = _JUSTIFICATIONS[max(0, self.JustificationCombo.SelectedIndex)]
 
-        _HANDLER.options = {
+        self._handler.options = {
             'straight': straight or angle == 0.0,
             'angle_deg': angle,
             'landing': common.mm_to_feet(landing_mm),
@@ -431,19 +468,19 @@ class DashboardWindow(forms.WPFWindow):
     @_guarded
     def _on_process(self, _sender, _args):
         self.push_options()
-        _HANDLER.request_visible()
+        self._handler.request_visible()
         self.set_status('Processing...')
-        _EVENT.Raise()
+        self._event.Raise()
 
     @_guarded
     def _on_dynamic(self, _sender, _args):
         self.push_options()
         if self.DynamicCheck.IsChecked:
-            _WATCHER.start(revit.uiapp)
+            self._watcher.start(revit.uiapp)
             self.set_status('Dynamic tagging ON - new tags will follow '
                             'these rules.')
         else:
-            _WATCHER.stop()
+            self._watcher.stop()
             self.set_status('Dynamic tagging off.')
 
     @_guarded
@@ -473,16 +510,44 @@ class DashboardWindow(forms.WPFWindow):
 
     @_guarded
     def _on_closed(self, _sender, _args):
-        _WATCHER.stop()          # never outlive the palette
-        _HANDLER.window = None
+        self._watcher.stop()     # never outlive the palette
+        self._handler.window = None
+        self._state['window'] = None
+
+
+def _reveal(window):
+    """Bring an already-open palette forward. False if it has gone."""
+    try:
+        if not window.IsLoaded:
+            return False
+        from System.Windows import WindowState
+        if window.WindowState == WindowState.Minimized:
+            window.WindowState = WindowState.Normal
+        window.Activate()
+        return True
+    except Exception:
+        return False
+
+
+def main():
+    if doc is None or uidoc is None:
+        forms.alert('Open a project document first.', title=TITLE)
+        return
+
+    state = _session()
+    # One palette per session: a second press restores the open one
+    # rather than stacking another (which would double-tag every new tag).
+    if state['window'] is not None and _reveal(state['window']):
+        return
+
+    window = DashboardWindow(state)
+    state['window'] = window
+    window.show()
 
 
 if __name__ == '__main__':
     try:
-        if doc is None or uidoc is None:
-            forms.alert('Open a project document first.', title=TITLE)
-        else:
-            DashboardWindow().show()
+        main()
     except Exception:
         details = traceback.format_exc()
         file_log.error('Dashboard failed to open:\n%s', details)
