@@ -100,6 +100,7 @@
 <h2>Reporting and troubleshooting</h2>
 <ul>
   <li>Tags <b>without a leader</b> or <b>pinned</b> are skipped and reported — tick "Leader" in Properties, or unpin, then rerun.</li>
+  <li><b>Picking close to a pipe is fine.</b> A tag's head sits at the middle of its text, so a wide tag picked right beside its pipe would have its text sitting on the pipe. Rather than refuse the pick, the stack backs off by the smallest distance that clears it and tells you how far it moved. Your click sets the intent; the tool keeps it legal.</li>
   <li>Settings live in <code>%APPDATA%\CKR\tag_align_settings.json</code>; a corrupt file falls back to defaults.</li>
   <li>Every run logs to <code>%APPDATA%\CKR\logs\align_tags.log</code> and exports <code>align_check.png</code> of the result for review.</li>
   <li>If a head lands more than 10 mm off-plan, the tool warns and names the tag in the log.</li>

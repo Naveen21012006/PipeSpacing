@@ -64,6 +64,10 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | A47 | Auto snapshot | Any run with picks | `%APPDATA%\CKR\logs\align_check*.png` holds the drawn result for review without screenshots |
 | A48 | Mid-span bends on long runs | Angle 0, tag a LONG horizontal run, pick at its middle | Landing + 90°-style tilted bend appear right at the pick (no "Pick skipped"); corner stubs behave exactly as before |
 | A36 | Re-align refreshes elbows | Align, then re-align the same tags to a new spot; select one | Elbow bubble sits at the NEW midpoint (not the old one); dragging the tag toward the pipe works freely |
+| A49 | **Close pick is nudged, never refused** | Pick deliberately close to a pipe — within about half a tag's text width | The stack IS placed, backed off just far enough that the text clears the pipe; output says "Stack moved N mm back from the pipes". **No "Pick skipped"** — a pick is never refused for geometry |
+| A50 | Nudge keeps the pick's intent | Pick close to a pipe, note where you clicked | The stack moves straight back from the pipes only — same row, same side, minimum distance. It does not jump to the other side |
+| A51 | Far side still mirrors | Pick on the far side of the pipes from the tags | Quadrant mirrors (message shown) instead of nudging — the two corrections don't fight |
+| A52 | Single-tag clusters place | Set Cluster Distance small so tags split into 1-tag clusters, then pick for each | Every cluster places. This is the 2026-07-28 regression: one tag used to be refused on any imperfection because `broken*2 > 1` |
 
 ## Dialog + persistence
 

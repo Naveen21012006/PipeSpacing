@@ -957,3 +957,79 @@ def test_reversed_pipe_span_is_tolerated():
     assert len(plan) == 2
     for p in plan:
         assert p['end'][1] == pytest.approx(40.0)   # collapsed to middle
+
+
+# ---------------------------------------------------------------------------
+# shortfall - the contract the anchor nudge relies on
+# ---------------------------------------------------------------------------
+def _reach_item(pos, exit_edge, span=(-300.0, 100.0)):
+    return [{'key': 0, 'pos': pos, 'span': span, 'exit_edge': exit_edge}]
+
+
+def test_a_plan_that_fits_reports_no_shortfall():
+    plan = engine.plan_ordered((0.0, 0.0), _reach_item(40.0, 5.0),
+                               engine.UPPER_LEFT, 45.0, 2.0, 4.0, 3.0, 'v')
+    assert plan[0]['angle_ok']
+    assert plan[0]['shortfall'] == 0.0
+
+
+def test_shortfall_measures_exactly_how_far_the_text_overhangs():
+    # Pipe at u=10, text half-width 5, picked at u=8: the text's leading
+    # edge lands 3 past the pipe, so 3 is what the stack must give back.
+    plan = engine.plan_ordered((8.0, 0.0), _reach_item(10.0, 5.0),
+                               engine.UPPER_LEFT, 45.0, 2.0, 4.0, 3.0, 'v')
+    assert not plan[0]['angle_ok']
+    assert plan[0]['shortfall'] == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize('mode,pos,anchor_u', [
+    (engine.UPPER_LEFT, 10.0, 8.0),      # leaders exit right
+    (engine.UPPER_RIGHT, -10.0, -8.0),   # leaders exit left, mirrored
+    (engine.LOWER_LEFT, 10.0, 8.0),
+    (engine.LOWER_RIGHT, -10.0, -8.0),
+])
+def test_retreating_by_the_shortfall_makes_the_pick_legal(mode, pos,
+                                                          anchor_u):
+    # The exact contract nudge_clear depends on: back off by the reported
+    # shortfall and the tag can reach its pipe. If this drifts, the tool
+    # silently starts refusing picks again.
+    items = _reach_item(pos, 5.0)
+    plan = engine.plan_ordered((anchor_u, 0.0), items, mode, 45.0,
+                               2.0, 4.0, 3.0, 'v')
+    need = plan[0]['shortfall']
+    assert need > 0.0
+
+    moved_u = anchor_u - engine.exit_sign(mode) * need
+    retry = engine.plan_ordered((moved_u, 0.0), items, mode, 45.0,
+                                2.0, 4.0, 3.0, 'v')
+    assert retry[0]['angle_ok']
+    assert retry[0]['shortfall'] == 0.0
+
+
+def test_horizontal_run_reports_a_shortfall_when_the_turn_is_behind_it():
+    # Angle 0 onto a horizontal pipe: picking past the pipe's far end
+    # puts the turn behind the text, which retreating also mends.
+    items = [{'key': 0, 'pos': -20.0, 'span': (0.0, 30.0),
+              'exit_edge': 8.0}]
+    plan = engine.plan_ordered((60.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=1.0)
+    assert not plan[0]['angle_ok']
+    assert plan[0]['shortfall'] > 0.0
+
+    need = plan[0]['shortfall']
+    retry = engine.plan_ordered((60.0 - need, 0.0), items,
+                                engine.UPPER_LEFT, 0.0, 2.0, 4.0, 3.0, 'h',
+                                clearance=1.0)
+    assert retry[0]['angle_ok']
+
+
+def test_unfixable_breaks_report_no_shortfall():
+    # The pipe is on the wrong side vertically - sliding along u cannot
+    # mend that, so the quadrant mirror must handle it instead and the
+    # nudge must not chase it.
+    items = [{'key': 0, 'pos': 50.0, 'span': (0.0, 30.0),
+              'exit_edge': 2.0}]
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.LOWER_LEFT, 45.0,
+                               2.0, 4.0, 3.0, 'h')
+    if not plan[0]['angle_ok']:
+        assert plan[0]['shortfall'] == 0.0
