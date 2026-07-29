@@ -483,10 +483,20 @@ def build_ordered_bundle(targets, basis, straight_mode):
 def ordered_offsets(wrapper, eff_mode):
     """(head_offset, line_offset, exit_edge) from the anchor corner.
 
-    The anchor corner is the text's bottom corner on the far side from the
-    pipes: bottom-LEFT when leaders exit right, bottom-RIGHT when they
-    exit left - the point the user expects their click to place. The
-    leader line runs at the TEXT's mid-height (line_offset), which is
+    The anchor corner is ALWAYS the text's bottom-LEFT corner, whichever
+    side of the pipes the stack sits on (user rule, 2026-07-29). Because
+    the text reads left to right, that single rule gives what the user
+    asked for on both sides: for a stack LEFT of the pipes the column
+    falls on the OUTSIDE edge, and for one RIGHT of them on the INSIDE
+    edge - the edge the leaders actually leave by, so their landings all
+    start at the same u and comb out neatly instead of staggering.
+
+    ``exit_edge`` is the distance from that corner to the edge the leader
+    departs from: the full text width when leaders exit right, and zero
+    when they exit left, because then the corner IS the exit edge and the
+    text runs away from the pipes behind it.
+
+    The leader line runs at the TEXT's mid-height (line_offset), which is
     where Revit actually attaches it - using the head's height instead
     kinks the landing on families whose head is not the text centre.
 
@@ -498,10 +508,11 @@ def ordered_offsets(wrapper, eff_mode):
     if bbox is None or head is None:
         return None
     u_lo, u_hi, v_lo, v_hi = bbox
-    corner_u = u_lo if engine.exit_sign(eff_mode) > 0 else u_hi
+    corner_u = u_lo
+    exit_edge = (u_hi - u_lo) if engine.exit_sign(eff_mode) > 0 else 0.0
     return ((head[0] - corner_u, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
-            (u_hi - u_lo))
+            exit_edge)
 
 
 def _median(values):
@@ -530,11 +541,11 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
 
     items = []
     for base, offsets in zip(base_items, measured):
-        head_offset, line_offset, width = offsets or fallback
+        head_offset, line_offset, exit_edge = offsets or fallback
         item = dict(base)
         item['head_offset'] = head_offset
         item['line_offset'] = line_offset
-        item['exit_edge'] = width
+        item['exit_edge'] = exit_edge
         items.append(item)
     return engine.plan_ordered(
         anchor2d, items, eff_mode,
