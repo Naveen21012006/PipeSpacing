@@ -143,9 +143,9 @@
         <GroupBox Header="Options" Padding="6" Margin="0,8,0,0">
             <StackPanel>
                 <CheckBox x:Name="OrderByPipeCheck" Content="Order by pipe position"
-                          ToolTip="Stack reads in drawing order: leftmost pipe = top tag (vertical runs), topmost pipe = top tag (horizontal runs); arrowheads are re-placed on their pipes along the leader line. Needs every selected tag to point at a pipe/duct run."/>
+                          ToolTip="Stack reads in drawing order: leftmost pipe = top tag (vertical runs), topmost pipe = top tag (horizontal runs); arrowheads are re-placed on their pipes along the leader line. The side is taken from where you click relative to the pipes, so the quadrant buttons set only above/below. Needs every selected tag to point at a pipe/duct run."/>
                 <CheckBox x:Name="SwitchSideCheck" Content="Switch Pick Point Side" Margin="0,4,0,0"
-                          ToolTip="Mirror the side of the pick point the tags are placed on."/>
+                          ToolTip="Mirror the side of the pick point the tags are placed on. Only applies when Order by pipe position is OFF - with it on, the side is taken from where you click relative to the pipes."/>
                 <CheckBox x:Name="AttachedEndCheck" Content="Attached End Tags" Margin="0,4,0,0"
                           ToolTip="Convert Attached leader ends to Free ends pinned on the element so the exact slant angle can be honoured (modifies the arrowhead position). When off, attached-end tags still align, but Revit controls their arrowheads so the slant angle is approximate."/>
                 <CheckBox x:Name="KeepSelectionCheck" Content="Keep Selection After Use" Margin="0,4,0,0"

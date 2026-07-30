@@ -515,6 +515,44 @@ def ordered_offsets(wrapper, eff_mode):
             exit_edge)
 
 
+def bundle_centre_u(bundle, base_items):
+    """Mean u of the tagged PIPES themselves, in view coordinates.
+
+    Taken from the pipe geometry and never from the arrowheads: applying
+    a pick moves the arrowheads, and the side must not depend on what a
+    previous pick did.
+    """
+    values = []
+    for item in base_items:
+        if bundle == 'v':
+            values.append(float(item['pos']))       # the pipe's own u
+        else:
+            lo, hi = item['span']                   # pipe runs along u
+            values.append((float(lo) + float(hi)) / 2.0)
+    return sum(values) / len(values) if values else 0.0
+
+
+def side_mode(config, anchor2d, bundle, base_items):
+    """The quadrant for THIS pick, decided by where the user clicked.
+
+    A pure function of (pick point, tagged pipes, dialog): clicking right
+    of the bundle puts the stack on the right, so its leaders exit left,
+    and vice versa. Upper/Lower still comes from the dialog - only the
+    side is geometric.
+
+    Switch Pick Point Side is deliberately NOT consulted here: the click
+    already says which side, and honouring both would let the dialog
+    contradict the geometry (user decision, 2026-07-30). It still applies
+    to the standard, non-ordered alignment.
+    """
+    configured = engine.resolve_mode(config['mode'], False)
+    upper = configured in (engine.UPPER_LEFT, engine.UPPER_RIGHT)
+    stack_right = anchor2d[0] >= bundle_centre_u(bundle, base_items)
+    if upper:
+        return engine.UPPER_RIGHT if stack_right else engine.UPPER_LEFT
+    return engine.LOWER_RIGHT if stack_right else engine.LOWER_LEFT
+
+
 def _median(values):
     ordered_values = sorted(values)
     return ordered_values[len(ordered_values) // 2]
@@ -926,6 +964,40 @@ def final_arrangement(records, config, basis):
                   len(moved), remaining)
 
 
+def log_pick(anchor2d, mode, plan, targets):
+    """Trace one pick: where it landed, which side won, and the residual.
+
+    The residual is the gap between the pick and the bottom row's
+    bottom-left text corner - the acceptance measure for the anchor, so
+    a regression shows up in the log rather than only on screen.
+    """
+    file_log.info('Pick u=%.0fmm v=%.0fmm -> %s (leaders exit %s).',
+                  common.feet_to_mm(anchor2d[0]),
+                  common.feet_to_mm(anchor2d[1]), mode,
+                  'left' if engine.exit_sign(mode) < 0 else 'right')
+    corner = None
+    for entry in plan:
+        wrapper = targets[entry['key']]
+        head = entry['head']
+        file_log.info('  row %s tag %s head u=%.0fmm v=%.0fmm.',
+                      entry['row'], wrapper.id_value,
+                      common.feet_to_mm(head[0]),
+                      common.feet_to_mm(head[1]))
+        if entry['row'] == 0:
+            bbox = getattr(wrapper, 'bbox2d', None)
+            ref = getattr(wrapper, 'head_ref2d', None)
+            if bbox is not None and ref is not None:
+                # bbox is (u_lo, u_hi, v_lo, v_hi) about head_ref2d.
+                corner = (head[0] + (bbox[0] - ref[0]),
+                          head[1] + (bbox[2] - ref[1]))
+    if corner is None:
+        file_log.info('  bottom-left residual: not measurable.')
+    else:
+        file_log.info('  bottom-left residual: du=%.0fmm dv=%.0fmm.',
+                      common.feet_to_mm(corner[0] - anchor2d[0]),
+                      common.feet_to_mm(corner[1] - anchor2d[1]))
+
+
 def align_set(targets, config, basis, gap, justification, prompt):
     """The pick loop for ONE cluster of tags.
 
@@ -974,29 +1046,22 @@ def align_set(targets, config, basis, gap, justification, prompt):
             break
 
         anchor2d = common.to_2d(point, basis)
-        effective = engine.resolve_mode(config['mode'],
-                                        config['switch_side'])
 
         if ordered is not None:
             bundle, base_items = ordered
+            # The side is decided by THIS click against the pipes, so it
+            # is right first time. The old reactive mirror is gone with
+            # it: it only fired when EVERY leader failed, which left a
+            # cluster that was mostly - but not entirely - on the wrong
+            # side uncorrected.
+            effective = side_mode(config, anchor2d, bundle, base_items)
             plan = ordered_plan(anchor2d, base_items, targets, effective,
                                 bundle, config, vertical, landing,
                                 horizontal)
-            # Every pipe behind the stack: the pick is on the other side
-            # of the run - mirror the exit for THIS pick.
-            if plan and all(not entry['angle_ok'] for entry in plan):
-                mirrored = engine.resolve_mode(effective, True)
-                retry = ordered_plan(anchor2d, base_items, targets,
-                                     mirrored, bundle, config, vertical,
-                                     landing, horizontal)
-                if any(entry['angle_ok'] for entry in retry):
-                    plan = retry
-                    output.print_md(
-                        ':bulb: Quadrant switched to **{0}** for this '
-                        'pick - the configured {1} put every pipe behind '
-                        'the stack.'.format(_MODE_NAMES[mirrored],
-                                            _MODE_NAMES[effective]))
+            log_pick(anchor2d, effective, plan, targets)
         else:
+            effective = engine.resolve_mode(config['mode'],
+                                            config['switch_side'])
             plan = engine.plan_alignment(
                 anchor2d, items,
                 config['mode'], config['angle_deg'],
@@ -1025,9 +1090,10 @@ def align_set(targets, config, basis, gap, justification, prompt):
                             _MODE_NAMES[detected],
                             _MODE_NAMES[effective]))
 
-        # Never commit a mostly-broken ordered plan: if even the mirrored
-        # orientation leaves most tags unable to reach their pipe (their
-        # text would cross it), skip this pick and keep what's there.
+        # Never commit a mostly-broken ordered plan: the side is already
+        # the one this click implies, so if most tags still cannot reach
+        # their pipe their text would cross it - skip and keep what's
+        # there.
         if ordered is not None and plan:
             broken = sum(1 for entry in plan if not entry['angle_ok'])
             if broken * 2 > len(plan):

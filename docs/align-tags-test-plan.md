@@ -31,7 +31,8 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | A12 | Four modes | Run each quadrant button once | Stack sits in the chosen quadrant; leaders exit the correct side (see note 1) |
 | A13 | Constant Landing | Enable, set Landing 1000 | Every landing measures exactly 1000 mm; heads follow the leaders instead of a straight column |
 | A14 | Intermittent Alignment | Enable, Horizontal Spacing 2000 | Two staggered columns at half the row height; odd rows offset AWAY from the elements |
-| A15 | Switch Pick Point Side | Toggle on, re-pick | Leader exit side mirrors (see note 1) |
+| A15 | Switch Pick Point Side | Toggle on, re-pick, with **Order by pipe position OFF** | Leader exit side mirrors (see note 1) |
+| A15b | Switch Side is inert in ordered mode | Toggle it on and off with **Order by pipe position ON**, picking the same spot each time | The result is identical both ways — with ordering on, the side comes from the click, not the dialog |
 | A16 | Attached End Tags off (default) | Include a tag with Attached leader end | Tag is aligned; arrowhead stays glued to the element; output notes the slant angle is approximate for it |
 | A17 | Attached End Tags on | Enable checkbox, repeat | Leader end becomes Free, pinned at the element's nearest point; slant angle exact; arrowhead may shift slightly |
 | A18 | Tags without leaders | Include one | Skipped + reported, never moved |
@@ -42,7 +43,9 @@ panel shows the new **Align Tags** button beside **Auto Tag**.
 | A23 | Keep Selection off | Toggle off | Selection cleared after Esc |
 | A24 | Turn Snaps Off | Toggle on | Pick point does not snap to geometry |
 | A25 | Section/elevation | Repeat A8 in a section view | Alignment works in the view plane, not world XY |
-| A26 | Wrong-quadrant pick | With Upper-Left selected, pick above-RIGHT of the tagged elements | Quadrant auto-switches for that pick; output explains and names the button to press for a permanent change |
+| A26 | Wrong-quadrant pick (ordering OFF) | With Upper-Left selected and **Order by pipe position OFF**, pick above-RIGHT of the tagged elements | Quadrant auto-switches for that pick; output explains and names the button to press for a permanent change |
+| A26b | **Side follows the click (ordering ON)** | With ordering ON, pick once LEFT of a bundle and once RIGHT of it, whatever the dialog quadrant says | Both land correctly first time. Leaders exit right from a left-hand pick, left from a right-hand one. **No "Quadrant switched" message** — the side was never wrong to begin with |
+| A26c | Cold start, both sides | Fresh Revit session, no prior placement. One right-hand pick; then repeat after a left-hand pick; then two right-hand picks in a row | All three right-hand results identical, and P sits on the bottom-left corner of the text block every time. The log's `bottom-left residual` line reads ~0 mm |
 | A27 | Order by pipe position | Tag a vertical riser bundle, align with the checkbox on (default) | Stack reads left-to-right: leftmost pipe = top tag; arrows re-placed on their pipes along the leader line. Horizontal runs: topmost pipe = top tag |
 | A28 | Straight leaders (angle 0) | Set Angle 0, align a riser bundle | Leaders are horizontal, arrow at each tag's own height; the elbow grip sits at the MIDPOINT of the line (drag-friendly); a tag whose pipe doesn't reach its height gets a small individual slant (output reports the count) |
 | A29 | Pick anchors the corner | Watch where the stack lands relative to the click | The click is the BOTTOM-LEFT corner of the lowest tag's text, **on either side of the pipes**; text left edges align up the column |
