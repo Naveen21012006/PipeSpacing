@@ -327,3 +327,36 @@ def test_missing_spans_do_not_explode():
     assert CFS(None, None, (40.0, 10.0), engine.LOWER_LEFT) is None
     fix = CFS(None, _spans(0.0, 10.5)[1], (40.0, 10.0), engine.LOWER_LEFT)
     assert fix == (0.0, pytest.approx(0.5))
+
+
+def test_upper_stacks_verify_v_through_the_landing_height():
+    # The 2026-08-02 report: Lower stacks landed on the pick, Upper ones
+    # sat hundreds of mm above it because v was skipped as unverifiable.
+    # The drawn landing runs at the text's MID-height and the TOP edge is
+    # leader-free for Upper modes, so bottom = 2*mid - top. Text drawn at
+    # 10.5..11.6 (mid 11.05) against a pick at 10.0: dv = +0.5.
+    u_span, v_span = _spans(39.5, 10.5)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_LEFT,
+              elbow_v=11.05)
+    assert fix == (pytest.approx(-0.5), pytest.approx(0.5))
+
+
+def test_upper_right_verifies_v_once_the_landing_is_known():
+    # Exit-left keeps u unverifiable, but the elbow trick recovers v.
+    u_span, v_span = _spans(39.0, 10.5)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT,
+              elbow_v=11.05)
+    assert fix == (0.0, pytest.approx(0.5))
+
+
+def test_upper_v_exact_when_bottom_landed_on_the_pick():
+    # Text spans 10.0..11.1 drawn, mid 10.55: bottom == pick -> no fix.
+    u_span, v_span = _spans(40.0, 10.0)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_LEFT,
+               elbow_v=10.55) is None
+
+
+def test_upper_without_a_readable_landing_still_skips_v():
+    # No elbow available: v stays unverified rather than guessed.
+    u_span, v_span = _spans(40.0, 9.0)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT) is None

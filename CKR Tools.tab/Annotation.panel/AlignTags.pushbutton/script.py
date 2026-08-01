@@ -563,7 +563,7 @@ _CORRECT_MIN_MM = 10.0     # drawn-corner misses below this are left alone
 _CORRECT_MAX_MM = 5000.0   # and above this the box is broken, not the pick
 
 
-def correction_from_spans(u_span, v_span, anchor2d, mode):
+def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None):
     """Residual of the DRAWN bottom-left corner against the pick.
 
     Measured AFTER placement, in the leader state the tag is actually
@@ -574,6 +574,11 @@ def correction_from_spans(u_span, v_span, anchor2d, mode):
 
         u: leaders exit RIGHT, so the left edge is leader-free;
         v: Lower modes, whose leaders RISE, leave the bottom edge free.
+        v, Upper modes: the leaders DESCEND, so the bottom edge is
+           leader - but the TOP edge is free, and the drawn landing runs
+           at the text's mid-height (``elbow_v``), so the bottom is
+           2*mid - top. Found the hard way: skipping Upper entirely left
+           those stacks hundreds of mm above the pick (2026-08-02).
 
     Unverifiable axes stay 0. Returns (du, dv) to subtract from the
     anchor, or None when there is nothing trustworthy to correct.
@@ -581,8 +586,11 @@ def correction_from_spans(u_span, v_span, anchor2d, mode):
     du = dv = 0.0
     if u_span is not None and engine.exit_sign(mode) > 0.0:
         du = u_span[0] - anchor2d[0]
-    if v_span is not None and engine.slant_sign(mode) > 0.0:
-        dv = v_span[0] - anchor2d[1]
+    if v_span is not None:
+        if engine.slant_sign(mode) > 0.0:
+            dv = v_span[0] - anchor2d[1]
+        elif elbow_v is not None:
+            dv = (2.0 * elbow_v - v_span[1]) - anchor2d[1]
     floor = common.mm_to_feet(_CORRECT_MIN_MM)
     cap = common.mm_to_feet(_CORRECT_MAX_MM)
     if abs(du) > cap or abs(dv) > cap:
@@ -1052,9 +1060,25 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     view = doc.ActiveView
     u_span = common.extent_along(wrapper.element, view, basis[0])
     v_span = common.extent_along(wrapper.element, view, basis[1])
-    fix = correction_from_spans(u_span, v_span, anchor2d, mode)
+
+    # Upper modes need the drawn landing height (text mid) to derive the
+    # bottom edge. Read the elbow Revit actually holds; fall back to the
+    # planned one - set_elbow was verified when it was applied.
+    elbow_v = None
+    if engine.slant_sign(mode) < 0.0:
+        elbow_v = bottom['elbow'][1]
+        try:
+            keys = wrapper.leader_keys()
+            position = getattr(wrapper, 'primary_position', 0) or 0
+            drawn = wrapper.get_elbow(keys[position])
+            if drawn is not None:
+                elbow_v = common.to_2d(drawn, basis)[1]
+        except Exception as ex:
+            common.logger.debug('Elbow read failed: {}'.format(ex))
+
+    fix = correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v)
     if fix is None and engine.exit_sign(mode) < 0.0 \
-            and engine.slant_sign(mode) < 0.0:
+            and engine.slant_sign(mode) < 0.0 and elbow_v is None:
         file_log.info('Drawn corner not verifiable for %s (leader covers '
                       'both datum sides).', mode)
     return fix
