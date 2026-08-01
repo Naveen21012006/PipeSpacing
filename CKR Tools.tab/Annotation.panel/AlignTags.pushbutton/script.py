@@ -615,6 +615,9 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
                 common.feet_to_mm(exit_edge),
                 common.feet_to_mm(median_edge))
             exit_edge = median_edge
+        # Remembered for log_pick's residual, so the log measures with
+        # the offsets that actually placed the tag.
+        targets[base['key']].effective_offset = head_offset
         item = dict(base)
         item['head_offset'] = head_offset
         item['line_offset'] = line_offset
@@ -1019,12 +1022,13 @@ def log_pick(anchor2d, mode, plan, targets):
                       common.feet_to_mm(head[0]),
                       common.feet_to_mm(head[1]))
         if entry['row'] == 0:
-            bbox = getattr(wrapper, 'bbox2d', None)
-            ref = getattr(wrapper, 'head_ref2d', None)
-            if bbox is not None and ref is not None:
-                # bbox is (u_lo, u_hi, v_lo, v_hi) about head_ref2d.
-                corner = (head[0] + (bbox[0] - ref[0]),
-                          head[1] + (bbox[2] - ref[1]))
+            # Measure with the SAME offsets the placement used - deriving
+            # the corner from the raw bounding box reported the box's
+            # contamination as a placement error (-482mm on a stack that
+            # was actually within 5mm, 2026-08-02).
+            used = getattr(wrapper, 'effective_offset', None)
+            if used is not None:
+                corner = (head[0] - used[0], head[1] - used[1])
     if corner is None:
         file_log.info('  bottom-left residual: not measurable.')
     else:
