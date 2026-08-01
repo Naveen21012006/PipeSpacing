@@ -559,6 +559,43 @@ def side_mode(config, anchor2d, bundle, base_items):
     return engine.LOWER_RIGHT if stack_right else engine.LOWER_LEFT
 
 
+_CORRECT_MIN_MM = 10.0     # drawn-corner misses below this are left alone
+_CORRECT_MAX_MM = 5000.0   # and above this the box is broken, not the pick
+
+
+def correction_from_spans(u_span, v_span, anchor2d, mode):
+    """Residual of the DRAWN bottom-left corner against the pick.
+
+    Measured AFTER placement, in the leader state the tag is actually
+    drawn in - the pre-measurement path proved untrustworthy because the
+    family re-anchors its text around the head with the leader's state
+    (2026-08-02: internally-perfect stacks landing hundreds of mm off
+    the pick). The box is only clean where the leader is not:
+
+        u: leaders exit RIGHT, so the left edge is leader-free;
+        v: Lower modes, whose leaders RISE, leave the bottom edge free.
+
+    Unverifiable axes stay 0. Returns (du, dv) to subtract from the
+    anchor, or None when there is nothing trustworthy to correct.
+    """
+    du = dv = 0.0
+    if u_span is not None and engine.exit_sign(mode) > 0.0:
+        du = u_span[0] - anchor2d[0]
+    if v_span is not None and engine.slant_sign(mode) > 0.0:
+        dv = v_span[0] - anchor2d[1]
+    floor = common.mm_to_feet(_CORRECT_MIN_MM)
+    cap = common.mm_to_feet(_CORRECT_MAX_MM)
+    if abs(du) > cap or abs(dv) > cap:
+        return None                     # silly numbers: broken box
+    if abs(du) <= floor:
+        du = 0.0
+    if abs(dv) <= floor:
+        dv = 0.0
+    if du == 0.0 and dv == 0.0:
+        return None
+    return (du, dv)
+
+
 def _median(values):
     # Lower-middle for even counts: these are box-derived lengths, and a
     # stale leader can only ever GROW a box - with half a cluster
@@ -1002,6 +1039,27 @@ def final_arrangement(records, config, basis):
                   len(moved), remaining)
 
 
+def _drawn_correction(targets, plan, anchor2d, mode, basis):
+    """Measure the drawn bottom row against the pick; None if nothing to fix.
+
+    Runs after apply_plan's transaction has committed, so the boxes are
+    regenerated and reflect what is actually on screen.
+    """
+    bottom = next((e for e in plan if e['row'] == 0), None)
+    if bottom is None:
+        return None
+    wrapper = targets[bottom['key']]
+    view = doc.ActiveView
+    u_span = common.extent_along(wrapper.element, view, basis[0])
+    v_span = common.extent_along(wrapper.element, view, basis[1])
+    fix = correction_from_spans(u_span, v_span, anchor2d, mode)
+    if fix is None and engine.exit_sign(mode) < 0.0 \
+            and engine.slant_sign(mode) < 0.0:
+        file_log.info('Drawn corner not verifiable for %s (leader covers '
+                      'both datum sides).', mode)
+    return fix
+
+
 def log_pick(anchor2d, mode, plan, targets):
     """Trace one pick: where it landed, which side won, and the residual.
 
@@ -1156,6 +1214,43 @@ def align_set(targets, config, basis, gap, justification, prompt):
             _, elbow_failures, flagged_last = apply_plan(
                 targets, plan, basis, justification, config,
                 move_ends=(ordered is not None))
+
+            # Self-correcting pick: measure where the drawn corner
+            # ACTUALLY landed and re-plan once with the residual folded
+            # in. Prediction from pre-measured boxes is untrustworthy
+            # for families that re-anchor their text with the leader
+            # state; the drawing itself is the only honest ruler.
+            if ordered is not None:
+                pick2d = anchor2d          # what the user actually chose
+                fix = _drawn_correction(targets, plan, pick2d,
+                                        effective, basis)
+                if fix is not None:
+                    file_log.info(
+                        'Drawn corner missed the pick by du=%.0fmm '
+                        'dv=%.0fmm; re-planning.',
+                        common.feet_to_mm(fix[0]),
+                        common.feet_to_mm(fix[1]))
+                    anchor2d = (pick2d[0] - fix[0],
+                                pick2d[1] - fix[1])
+                    plan = ordered_plan(anchor2d, base_items, targets,
+                                        effective, bundle, config,
+                                        vertical, landing, horizontal)
+                    _, elbow_failures, flagged_last = apply_plan(
+                        targets, plan, basis, justification, config,
+                        move_ends=True)
+                    # The corner must land on the ORIGINAL pick - the
+                    # shifted anchor is a means, not the target.
+                    check = _drawn_correction(targets, plan, pick2d,
+                                              effective, basis)
+                    if check is None:
+                        file_log.info('Drawn corner verified on the pick.')
+                    else:
+                        file_log.info(
+                            'Drawn corner still off by du=%.0fmm '
+                            'dv=%.0fmm after correction.',
+                            common.feet_to_mm(check[0]),
+                            common.feet_to_mm(check[1]))
+
             group.Assimilate()
             picks += 1
             record['anchor'] = anchor2d

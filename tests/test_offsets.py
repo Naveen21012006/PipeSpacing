@@ -263,3 +263,67 @@ def test_horizontal_bundles_use_their_run_midpoint():
 
 def test_an_empty_bundle_does_not_explode():
     assert bundle_centre_u('v', []) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Self-correcting pick - which drawn-corner misses are trusted and fixed
+# ---------------------------------------------------------------------------
+def _spans(corner_u, corner_v, w=3.0, h=1.1):
+    """Post-placement box spans for a text whose corner sits there."""
+    return (corner_u, corner_u + w), (corner_v, corner_v + h)
+
+
+CFS = _PARTS['correction_from_spans']
+FT = 1 / 304.8      # 1mm in feet
+
+
+def test_a_missed_corner_is_corrected_on_the_clean_sides():
+    # LL: leaders exit right and rise - both datum sides clean, so a
+    # drawn corner 0.5 up-left of the pick corrects in full.
+    u_span, v_span = _spans(39.5, 10.5)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT)
+    assert fix == (pytest.approx(-0.5), pytest.approx(0.5))
+
+
+def test_an_exact_landing_needs_no_correction():
+    u_span, v_span = _spans(40.0, 10.0)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT) is None
+
+
+def test_sub_tolerance_misses_are_left_alone():
+    u_span, v_span = _spans(40.0 + 5 * FT, 10.0 - 5 * FT)   # 5mm each way
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT) is None
+
+
+def test_exit_left_stacks_only_trust_the_vertical():
+    # LR: the leader leaves by the left edge, so u is contaminated and
+    # only v may be corrected.
+    u_span, v_span = _spans(39.0, 10.5)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_RIGHT)
+    assert fix == (0.0, pytest.approx(0.5))
+
+
+def test_upper_stacks_only_trust_the_horizontal():
+    # UL: leaders descend below the text, so v is contaminated and only
+    # u may be corrected.
+    u_span, v_span = _spans(39.5, 9.0)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_LEFT)
+    assert fix == (pytest.approx(-0.5), 0.0)
+
+
+def test_upper_right_has_no_clean_side_and_stays_put():
+    u_span, v_span = _spans(39.0, 9.0)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT) is None
+
+
+def test_a_broken_box_is_never_chased():
+    # A residual bigger than any real miss means the box is garbage -
+    # correcting from it would fling the stack across the view.
+    u_span, v_span = _spans(40.0 + 6000 * FT, 10.0)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT) is None
+
+
+def test_missing_spans_do_not_explode():
+    assert CFS(None, None, (40.0, 10.0), engine.LOWER_LEFT) is None
+    fix = CFS(None, _spans(0.0, 10.5)[1], (40.0, 10.0), engine.LOWER_LEFT)
+    assert fix == (0.0, pytest.approx(0.5))
