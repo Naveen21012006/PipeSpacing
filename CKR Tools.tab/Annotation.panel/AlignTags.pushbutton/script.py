@@ -508,9 +508,15 @@ def ordered_offsets(wrapper, eff_mode):
     if bbox is None or head is None:
         return None
     u_lo, u_hi, v_lo, v_hi = bbox
-    corner_u = u_lo
+    # The head goes ON the column: no horizontal bounding-box term at
+    # all. The box is leader-contaminated, and measure_layout's
+    # symmetric cap fires for some tags and not others, so any width
+    # term here indents whichever row happened to measure differently -
+    # and re-running drifts it further, because the leaders being
+    # measured have themselves moved since the last run (user, image
+    # 2026-08-02: one row 480mm out, having been 130mm out earlier).
     exit_edge = (u_hi - u_lo) if engine.exit_sign(eff_mode) > 0 else 0.0
-    return ((head[0] - corner_u, head[1] - v_lo),
+    return ((0.0, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
             exit_edge)
 
@@ -564,7 +570,11 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
 
     A tag whose text box could not be measured borrows the MEDIAN offsets
     of its neighbours (same tag family in practice), so one bad bounding
-    box cannot knock a single tag out of the column.
+    box cannot knock a single tag out of the column. A width that is an
+    OUTLIER against that median is treated the same way: the boxes are
+    leader-contaminated, and the symmetric cap misses a leader that
+    happens to balance the text (one tag in the user's 2026-08-02 run
+    came back double width and indented its whole row).
     """
     measured = [ordered_offsets(targets[base['key']], eff_mode)
                 for base in base_items]
@@ -577,9 +587,18 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
     else:
         fallback = ((0.0, 0.0), 0.0, 0.0)
 
+    median_edge = fallback[2]
     items = []
     for base, offsets in zip(base_items, measured):
         head_offset, line_offset, exit_edge = offsets or fallback
+        if median_edge > 0.0 and exit_edge > 1.4 * median_edge:
+            file_log.info(
+                'Tag %s: exit edge %.0fmm is an outlier; using the '
+                'cluster median %.0fmm.',
+                targets[base['key']].id_value,
+                common.feet_to_mm(exit_edge),
+                common.feet_to_mm(median_edge))
+            exit_edge = median_edge
         item = dict(base)
         item['head_offset'] = head_offset
         item['line_offset'] = line_offset

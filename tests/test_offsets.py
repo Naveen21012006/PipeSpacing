@@ -38,36 +38,34 @@ class _Tag(object):
     def __init__(self, bbox, head):
         self.bbox2d = bbox
         self.head_ref2d = head
+        self.id_value = id(self)
 
 
-# A 10-wide, 2-tall text box sitting at u 100..110, with the head at its
-# centre - the usual case for a tag family.
+# A 10-wide, 2-tall text box. The user's family is LEFT-JUSTIFIED with
+# the head on the text's left edge, so head_u == u_lo when the box is
+# clean.
 def _tag():
-    return _Tag((100.0, 110.0, 0.0, 2.0), (105.0, 1.0))
+    return _Tag((100.0, 110.0, 0.0, 2.0), (100.0, 1.0))
 
 
-def _left_edge_u(offsets, anchor_u):
-    """Where the text's left edge lands when the corner is at anchor_u."""
-    (head_du, _), _, _ = offsets
-    head_u = anchor_u + head_du
-    return head_u - 5.0        # head sits 5 right of the left edge
+@pytest.mark.parametrize('mode', engine.MODES)
+def test_the_head_lands_exactly_on_the_column(mode):
+    # No horizontal bounding-box term AT ALL: for this left-justified
+    # family the head IS the left edge, so head u == anchor u, whatever
+    # the box measured. This is what makes reruns stable - the box
+    # contains the old leader, which moves on every run.
+    (head_du, _), _, _ = ordered_offsets(_tag(), mode)
+    assert head_du == 0.0
 
 
-@pytest.mark.parametrize('mode', [engine.UPPER_LEFT, engine.LOWER_LEFT])
-def test_left_hand_stacks_align_on_their_outside_edge(mode):
-    # Leaders exit RIGHT, so the pipes are to the right: the left edge is
-    # the OUTSIDE one, and it is what the click places.
-    offsets = ordered_offsets(_tag(), mode)
-    assert _left_edge_u(offsets, 40.0) == pytest.approx(40.0)
-
-
-@pytest.mark.parametrize('mode', [engine.UPPER_RIGHT, engine.LOWER_RIGHT])
-def test_right_hand_stacks_align_on_their_inside_edge(mode):
-    # Leaders exit LEFT, so the pipes are to the left: the left edge is
-    # the INSIDE one. Same rule, and the user's correction - it used to
-    # be the right edge, which staggered the landings.
-    offsets = ordered_offsets(_tag(), mode)
-    assert _left_edge_u(offsets, 40.0) == pytest.approx(40.0)
+@pytest.mark.parametrize('mode', engine.MODES)
+def test_a_contaminated_box_cannot_indent_the_row(mode):
+    # The 2026-08-02 regression: a leader stub balancing the text makes
+    # the box symmetric, the cap never fires, and the head offset came
+    # out half the (doubled) box. Zero means zero regardless.
+    dirty = _Tag((99.0, 110.0, 0.0, 2.0), (104.5, 1.0))   # leader inside
+    (head_du, _), _, _ = ordered_offsets(dirty, mode)
+    assert head_du == 0.0
 
 
 def test_leaders_that_exit_right_clear_the_whole_text():
