@@ -360,3 +360,36 @@ def test_upper_without_a_readable_landing_still_skips_v():
     # No elbow available: v stays unverified rather than guessed.
     u_span, v_span = _spans(40.0, 9.0)
     assert CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT) is None
+
+
+def test_the_drawn_leader_direction_overrides_the_mode():
+    # The 2026-08-02 log: a Lower-Left pick ABOVE a horizontal run. The
+    # mode says leaders rise; the drawing descends them to the pipes, so
+    # the box's bottom edge is the ARROWHEAD - a fixed point. Trusting
+    # the mode chased it (same dv before and after correction); trusting
+    # the drawn direction derives the bottom from landing and top.
+    u_span = (39.5, 42.5)
+    v_span = (5.0, 15.1)         # bottom = arrow on the pipes, top clean
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
+              elbow_v=14.55, leader_rises=False)
+    # bottom = 2*14.55 - 15.1 = 14.0 -> dv = +4.0, never -5.0
+    assert fix == (pytest.approx(-0.5), pytest.approx(4.0))
+
+
+def test_a_rising_leader_in_an_upper_mode_reads_the_bottom_directly():
+    # Mirror case: Upper mode picked below the pipes - leaders rise, so
+    # the top edge is the contaminated one and the bottom is clean.
+    u_span = (40.0, 43.0)
+    v_span = (10.5, 99.0)        # top = arrow far above, bottom clean
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_LEFT,
+              leader_rises=True)
+    assert fix == (0.0, pytest.approx(0.5))
+
+
+def test_a_level_leader_counts_as_rising():
+    # Straight leaders run at the text mid-height: the bottom edge is
+    # free either way, and _drawn_correction maps end == elbow to rises.
+    u_span, v_span = _spans(40.0, 10.5)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
+              leader_rises=True)
+    assert fix == (0.0, pytest.approx(0.5))

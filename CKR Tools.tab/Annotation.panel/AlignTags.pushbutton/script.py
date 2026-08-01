@@ -563,7 +563,8 @@ _CORRECT_MIN_MM = 10.0     # drawn-corner misses below this are left alone
 _CORRECT_MAX_MM = 5000.0   # and above this the box is broken, not the pick
 
 
-def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None):
+def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None,
+                          leader_rises=None):
     """Residual of the DRAWN bottom-left corner against the pick.
 
     Measured AFTER placement, in the leader state the tag is actually
@@ -573,21 +574,29 @@ def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None):
     the pick). The box is only clean where the leader is not:
 
         u: leaders exit RIGHT, so the left edge is leader-free;
-        v: Lower modes, whose leaders RISE, leave the bottom edge free.
-        v, Upper modes: the leaders DESCEND, so the bottom edge is
-           leader - but the TOP edge is free, and the drawn landing runs
-           at the text's mid-height (``elbow_v``), so the bottom is
-           2*mid - top. Found the hard way: skipping Upper entirely left
-           those stacks hundreds of mm above the pick (2026-08-02).
+        v: when the leader RISES, the bottom edge is free and read
+           directly. When it DESCENDS, the bottom edge is leader - but
+           the TOP edge is free, and the drawn landing runs at the
+           text's mid-height (``elbow_v``), so the bottom is
+           2*mid - top.
+
+    ``leader_rises`` is taken from the DRAWN leader, never from the
+    dialog mode: a Lower-mode pick above a horizontal run still draws
+    descending leaders, and trusting the mode made the correction chase
+    the arrowhead - a fixed point on the pipes - and log the same
+    residual before and after (2026-08-02, dv=-4502 twice). Defaults to
+    the mode's slant only when the caller cannot say.
 
     Unverifiable axes stay 0. Returns (du, dv) to subtract from the
     anchor, or None when there is nothing trustworthy to correct.
     """
+    if leader_rises is None:
+        leader_rises = engine.slant_sign(mode) > 0.0
     du = dv = 0.0
     if u_span is not None and engine.exit_sign(mode) > 0.0:
         du = u_span[0] - anchor2d[0]
     if v_span is not None:
-        if engine.slant_sign(mode) > 0.0:
+        if leader_rises:
             dv = v_span[0] - anchor2d[1]
         elif elbow_v is not None:
             dv = (2.0 * elbow_v - v_span[1]) - anchor2d[1]
@@ -1061,11 +1070,18 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     u_span = common.extent_along(wrapper.element, view, basis[0])
     v_span = common.extent_along(wrapper.element, view, basis[1])
 
-    # Upper modes need the drawn landing height (text mid) to derive the
-    # bottom edge. Read the elbow Revit actually holds; fall back to the
-    # planned one - set_elbow was verified when it was applied.
+    # Which way does the DRAWN leader leave the text? The mode cannot be
+    # trusted for this - a Lower-mode pick above a horizontal run still
+    # draws descending leaders - so read it off the plan: the arrow
+    # against the landing. A level leader keeps the bottom edge free.
+    rises = bottom['end'][1] >= bottom['elbow'][1] - 1e-9
+
+    # A descending leader hides the bottom edge; derive it from the
+    # landing height (text mid) and the clean top edge instead. Read the
+    # elbow Revit actually holds; fall back to the planned one -
+    # set_elbow was verified when it was applied.
     elbow_v = None
-    if engine.slant_sign(mode) < 0.0:
+    if not rises:
         elbow_v = bottom['elbow'][1]
         try:
             keys = wrapper.leader_keys()
@@ -1076,9 +1092,10 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
         except Exception as ex:
             common.logger.debug('Elbow read failed: {}'.format(ex))
 
-    fix = correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v)
+    fix = correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v,
+                                leader_rises=rises)
     if fix is None and engine.exit_sign(mode) < 0.0 \
-            and engine.slant_sign(mode) < 0.0 and elbow_v is None:
+            and not rises and elbow_v is None:
         file_log.info('Drawn corner not verifiable for %s (leader covers '
                       'both datum sides).', mode)
     return fix
