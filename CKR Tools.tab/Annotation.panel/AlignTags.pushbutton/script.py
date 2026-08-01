@@ -508,15 +508,15 @@ def ordered_offsets(wrapper, eff_mode):
     if bbox is None or head is None:
         return None
     u_lo, u_hi, v_lo, v_hi = bbox
-    # The head goes ON the column: no horizontal bounding-box term at
-    # all. The box is leader-contaminated, and measure_layout's
-    # symmetric cap fires for some tags and not others, so any width
-    # term here indents whichever row happened to measure differently -
-    # and re-running drifts it further, because the leaders being
-    # measured have themselves moved since the last run (user, image
-    # 2026-08-02: one row 480mm out, having been 130mm out earlier).
+    # head - u_lo places the text's left edge on the column wherever the
+    # family anchors its head (this family: text centre - the log's
+    # symmetric caps prove it, so a plain zero here shifted every stack
+    # half a width left, 2026-08-02 regression). The term is bounding-box
+    # derived and the box can hold a stale leader, so ordered_plan snaps
+    # per-tag outliers to the cluster median - that is what stops one
+    # contaminated tag indenting its row on re-runs.
     exit_edge = (u_hi - u_lo) if engine.exit_sign(eff_mode) > 0 else 0.0
-    return ((0.0, head[1] - v_lo),
+    return ((head[0] - u_lo, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
             exit_edge)
 
@@ -560,8 +560,11 @@ def side_mode(config, anchor2d, bundle, base_items):
 
 
 def _median(values):
+    # Lower-middle for even counts: these are box-derived lengths, and a
+    # stale leader can only ever GROW a box - with half a cluster
+    # contaminated, the upper-middle would BE a contaminated value.
     ordered_values = sorted(values)
-    return ordered_values[len(ordered_values) // 2]
+    return ordered_values[(len(ordered_values) - 1) // 2]
 
 
 def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
@@ -587,10 +590,23 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
     else:
         fallback = ((0.0, 0.0), 0.0, 0.0)
 
+    median_du = fallback[0][0]
     median_edge = fallback[2]
     items = []
     for base, offsets in zip(base_items, measured):
         head_offset, line_offset, exit_edge = offsets or fallback
+        # Contamination only ever GROWS the box (a stale leader extends
+        # it), so a term well above the cluster median is a bad box, not
+        # a wide tag. Snap it to the median; same family in practice, so
+        # the median is the honest value.
+        if median_du > 0.0 and head_offset[0] > 1.4 * median_du:
+            file_log.info(
+                'Tag %s: head offset %.0fmm is an outlier; using the '
+                'cluster median %.0fmm.',
+                targets[base['key']].id_value,
+                common.feet_to_mm(head_offset[0]),
+                common.feet_to_mm(median_du))
+            head_offset = (median_du, head_offset[1])
         if median_edge > 0.0 and exit_edge > 1.4 * median_edge:
             file_log.info(
                 'Tag %s: exit edge %.0fmm is an outlier; using the '
@@ -1199,11 +1215,29 @@ def main():
         forms.alert('No tags or text notes selected.', title=TITLE)
         return
 
+    # Plain click = run with the saved settings; SHIFT+click = open the
+    # dialog. The first ever run always shows it - never pick with
+    # settings the user has not seen. (Restored from Phase B at the
+    # user's request, 2026-08-02.)
+    try:
+        shift = bool(__shiftclick__)     # noqa: F821 - pyRevit injects it
+    except NameError:
+        shift = False
+
     loaded = settings.load()
-    config = ui.show_config(doc, loaded)
-    if config is None:
-        return  # cancelled; selection left untouched
-    settings.save(config)
+    if shift or not os.path.exists(settings.SETTINGS_PATH):
+        config = ui.show_config(doc, loaded)
+        if config is None:
+            return  # cancelled; selection left untouched
+        settings.save(config)
+    else:
+        config = loaded
+        output.print_md(
+            ':gear: Using saved settings (angle {0:g}, {1} mode). '
+            'Shift+click the button to open the dialog.'.format(
+                config['angle_deg'],
+                'order-by-pipe' if config.get('order_by_pipe', True)
+                else 'standard'))
     _config = config
 
     targets, skipped = partition_targets(wrapped)

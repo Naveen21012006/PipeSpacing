@@ -17,11 +17,29 @@ _SCRIPT = os.path.join(
     'CKR Tools.tab', 'Annotation.panel', 'AlignTags.pushbutton', 'script.py')
 
 
+class _CommonStub(object):
+    """Unit passthroughs so ordered_plan's logging can run under pytest."""
+
+    @staticmethod
+    def mm_to_feet(value):
+        return value / 304.8
+
+    @staticmethod
+    def feet_to_mm(value):
+        return value * 304.8
+
+
+class _LogStub(object):
+    def info(self, *args):
+        pass
+
+
 def _load_pure_parts():
     source = open(_SCRIPT).read()
     start = source.index('def ordered_offsets')
-    end = source.index('def _median')
-    namespace = {'engine': engine}
+    end = source.index('_MODE_NAMES = {')
+    namespace = {'engine': engine, 'common': _CommonStub,
+                 'file_log': _LogStub(), 'FITTING_CLEARANCE_MM': 250.0}
     exec(compile(source[start:end], 'script', 'exec'), namespace)
     return namespace
 
@@ -30,6 +48,8 @@ _PARTS = _load_pure_parts()
 ordered_offsets = _PARTS['ordered_offsets']
 bundle_centre_u = _PARTS['bundle_centre_u']
 side_mode = _PARTS['side_mode']
+ordered_plan = _PARTS['ordered_plan']
+_median = _PARTS['_median']
 
 
 class _Tag(object):
@@ -41,31 +61,68 @@ class _Tag(object):
         self.id_value = id(self)
 
 
-# A 10-wide, 2-tall text box. The user's family is LEFT-JUSTIFIED with
-# the head on the text's left edge, so head_u == u_lo when the box is
-# clean.
+# A 10-wide, 2-tall text box with the head at its CENTRE - the user's
+# family, proven by the log's symmetric caps (head ~460mm from either
+# edge of ~920mm text). Assuming a left-edge head here is the 2026-08-02
+# regression that shifted every stack half a width off its pick.
 def _tag():
-    return _Tag((100.0, 110.0, 0.0, 2.0), (100.0, 1.0))
+    return _Tag((100.0, 110.0, 0.0, 2.0), (105.0, 1.0))
 
 
 @pytest.mark.parametrize('mode', engine.MODES)
-def test_the_head_lands_exactly_on_the_column(mode):
-    # No horizontal bounding-box term AT ALL: for this left-justified
-    # family the head IS the left edge, so head u == anchor u, whatever
-    # the box measured. This is what makes reruns stable - the box
-    # contains the old leader, which moves on every run.
+def test_the_text_left_edge_lands_on_the_column(mode):
+    # head_du carries the family's own head-to-left-edge distance, so
+    # the LEFT EDGE sits on the pick - for a centre-head family the head
+    # itself lands half a width right of it.
     (head_du, _), _, _ = ordered_offsets(_tag(), mode)
-    assert head_du == 0.0
+    assert head_du == pytest.approx(5.0)
 
 
-@pytest.mark.parametrize('mode', engine.MODES)
-def test_a_contaminated_box_cannot_indent_the_row(mode):
-    # The 2026-08-02 regression: a leader stub balancing the text makes
-    # the box symmetric, the cap never fires, and the head offset came
-    # out half the (doubled) box. Zero means zero regardless.
-    dirty = _Tag((99.0, 110.0, 0.0, 2.0), (104.5, 1.0))   # leader inside
-    (head_du, _), _, _ = ordered_offsets(dirty, mode)
-    assert head_du == 0.0
+def test_median_biases_low_because_boxes_only_grow():
+    # A stale leader can only ever ENLARGE a box: with half the cluster
+    # contaminated, the upper-middle would itself be a contaminated
+    # value, so even counts take the lower-middle.
+    assert _median([460.0, 460.0, 938.0, 938.0]) == 460.0
+    assert _median([441.0, 456.0, 460.0, 938.0]) == 456.0
+    assert _median([7.0]) == 7.0
+
+
+def _plan_cfg():
+    return {'angle_deg': 0.0, 'intermittent': False}
+
+
+def test_one_contaminated_tag_cannot_indent_its_row():
+    # End to end through ordered_plan: three clean centre-head tags and
+    # one whose old leader balanced its text, doubling the box without
+    # tripping the symmetric cap (tag 21419026, user's image). Its head
+    # offset snaps to the cluster median, so all four heads share one
+    # column instead of one row indenting by half the contamination.
+    clean = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(3)]
+    dirty = _Tag((-4.7, 14.0, 0.0, 2.0), (4.65, 1.0))   # symmetric, doubled
+    targets = clean + [dirty]
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(4)]
+    plan = ordered_plan((40.0, 0.0), base_items, targets,
+                        engine.LOWER_LEFT, 'v', _plan_cfg(),
+                        3.0, 4.0, 3.0)
+    heads = set(round(entry['head'][0], 6) for entry in plan)
+    assert len(heads) == 1                      # one column, no indent
+    assert heads.pop() == pytest.approx(40.0 + 4.6)
+
+
+def test_clean_clusters_are_untouched_by_the_outlier_snap():
+    # Slightly different genuine widths must survive: the snap only
+    # fires ABOVE 1.4x the median, so honest variation stays put.
+    tags = [_Tag((0.0, w, 0.0, 2.0), (w / 2.0, 1.0))
+            for w in (8.8, 9.0, 9.2, 9.4)]
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(4)]
+    plan = ordered_plan((40.0, 0.0), base_items, tags,
+                        engine.LOWER_LEFT, 'v', _plan_cfg(),
+                        3.0, 4.0, 3.0)
+    by_key = {entry['key']: entry['head'][0] for entry in plan}
+    for i, w in enumerate((8.8, 9.0, 9.2, 9.4)):
+        assert by_key[i] == pytest.approx(40.0 + w / 2.0)
 
 
 def test_leaders_that_exit_right_clear_the_whole_text():
