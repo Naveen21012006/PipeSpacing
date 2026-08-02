@@ -28,6 +28,11 @@ DEFAULTS = {
     'landing_mm': 1524.0,
     'horizontal_mm': 3048.0,
     'cluster_mm': 2000.0,   # 0 disables auto-splitting
+    # Learned from the drawing (self-correcting pick): the tag family's
+    # drawn head-to-left-edge distance. 0 = not learned yet. Measured on
+    # exit-right picks, where the left edge is leader-free, and spent on
+    # exit-left picks, where it is not.
+    'learned_left_mm': 0.0,
     'switch_side': False,
     'attached_end': False,
     'keep_selection': True,
@@ -41,7 +46,7 @@ DEFAULTS = {
 _BOOL_KEYS = ('switch_side', 'attached_end', 'keep_selection', 'snaps_off',
               'constant_landing', 'intermittent', 'order_by_pipe')
 _FLOAT_KEYS = ('angle_deg', 'vertical_mm', 'landing_mm', 'horizontal_mm',
-               'cluster_mm')
+               'cluster_mm', 'learned_left_mm')
 _JUSTIFICATIONS = ('unchanged', 'left', 'right', 'automatic')
 
 

@@ -393,3 +393,30 @@ def test_a_level_leader_counts_as_rising():
     fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
               leader_rises=True)
     assert fix == (0.0, pytest.approx(0.5))
+
+
+def test_exit_left_corrects_u_when_handed_the_datum_edge():
+    # The right-side gap, closed: the box's left edge is leader, but the
+    # caller derives the true edge (learned head-to-edge distance, or
+    # the text-width fallback) and u corrects like any other axis.
+    u_span = (5.0, 43.0)         # left = arrow on the pipes, right clean
+    v_span = (10.0, 11.1)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_RIGHT,
+              leader_rises=True, text_left=39.5)
+    assert fix == (pytest.approx(-0.5), 0.0)
+
+
+def test_exit_left_without_a_derived_edge_still_skips_u():
+    u_span = (5.0, 43.0)
+    v_span = (10.0, 11.1)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_RIGHT,
+               leader_rises=True) is None
+
+
+def test_exit_right_ignores_the_derived_edge_and_measures():
+    # When the box CAN be measured, measurement wins over derivation.
+    u_span = (39.5, 42.5)
+    v_span = (10.0, 11.1)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
+              leader_rises=True, text_left=38.0)
+    assert fix == (pytest.approx(-0.5), 0.0)
