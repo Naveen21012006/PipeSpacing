@@ -214,6 +214,27 @@ def auto_riser_through(flow_up):
 # riser block sit on the reference line, on top of the normal tag pitch.
 AUTO_BLOCK_GAP_MM = 6.0
 
+# Write a diagnostic log of every Auto Tag run to
+# %APPDATA%\CKR\logs\autotag.log: the row decisions, the leader geometry, and
+# a self-check that counts leader crossings. Cheap, and it turns "the tags look
+# tangled" into a named fault with coordinates. Set False to switch it off.
+AUTO_LOG_ENABLED = True
+
+# After working out an arrangement the Auto method AUDITS it: it runs the same
+# geometric crossing test the log publishes, and if any leader crosses another
+# it re-plans the block responsible on the other side of its pipes and scores
+# the whole drawing again, keeping the best arrangement it found. This is the
+# number of times it is allowed to change its mind. 1 disables the repair
+# (the audit still runs and still reports).
+AUTO_AUDIT_PASSES = 6
+
+# Minimum VISIBLE length of a 90-degree leader's drop, in row-pitches. A tag
+# seated almost level with its own pipe draws a drop too short to read (the
+# arrow crowds the pipe line); the reframe pass re-seats such tags onto the
+# nearest row a full drop away - which also spends any vacant stretch of the
+# column. 1.0 = one row (the approved default); 0 disables the rule.
+AUTO_MIN_DROP_ROWS = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Tag creation defaults

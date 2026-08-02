@@ -23,6 +23,8 @@ Only tag heads are moved. MEP elements are never touched.
 from collections import OrderedDict
 
 import config
+import diagnostics
+import engine_bridge
 import utils
 
 
@@ -113,6 +115,11 @@ def _measure_head_bounds(tags, view, doc):
 EDGE_LOW = 'low'        # left edge (across) / bottom edge (height)
 EDGE_HIGH = 'high'      # right edge (across) / top edge (height)
 EDGE_CENTER = 'center'
+
+# How many pitch-steps the Auto method will search for a vacant band before it
+# settles for its first choice. Generous: a step is one row, and giving up too
+# early puts a block on top of another.
+_SLOT_TRIES = 200
 
 
 def _anchor(span, head_coord, edge):
@@ -441,13 +448,17 @@ class _ClusterReferenceLine(AlignmentStrategy):
         """Move each tag's chosen edge onto the line at its target height.
 
         Returns (moves, new_heads): moves omits tags already in position;
-        new_heads holds the resulting head position for every tag (the
-        L-leader mode needs them even when the tag did not move).
+        new_heads holds the resulting head position for every tag it placed. A
+        tag with no entry in height_targets is skipped, so a caller can place a
+        subset here (the Auto method sends only the risers through this, its
+        horizontals going to the Align Tags engine).
         """
         across_coords = [utils.project(head, right) for head in heads]
         moves = []
         new_heads = {}
         for index, tag in enumerate(tags):
+            if index not in height_targets:
+                continue
             spans = bounds.get(index)
             span = spans[0] if spans else None
             anchor = _anchor(span, across_coords[index], self.edge)
@@ -684,6 +695,23 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 if anchor_pt is None:
                     continue    # nothing to point at - keep the normal leader
                 plan.append((tags[index], elbow, anchor_pt))
+            elif spec[0] == 'level':
+                # One straight level leader: the arrow meets the pipe at the
+                # tag's own row height (spec[2], clamped inside the run), so
+                # the line is level wherever the row falls inside the pipe and
+                # gently slants only when clamped at an end. The elbow grip
+                # parks at the line's midpoint, never blocking a manual grab.
+                arrow_v = spec[2]
+                anchor_pt = utils.get_element_anchor(elements[index], view)
+                if anchor_pt is None:
+                    continue    # nothing to point at - keep the normal leader
+                arrow = utils.shift(
+                    anchor_pt, up, arrow_v - utils.project(anchor_pt, up))
+                mid_u = (utils.project(head, right)
+                         + utils.project(arrow, right)) / 2.0
+                elbow = utils.shift(
+                    head, right, mid_u - utils.project(head, right))
+                plan.append((tags[index], elbow, arrow))
             else:  # 'horiz'
                 turn_across = spec[2]
                 elbow = utils.shift(
@@ -699,57 +727,771 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 plan.append((tags[index], elbow, arrow))
         return plan
 
-    # -- Auto mode: horizontals and risers as two blocks on one line -------
+    # -- Auto mode: ONE mixed column on the reference line -----------------
     def _auto_moves(self, tags, view, context, g):
-        """Lay a mixed selection out as two blocks on the one reference line.
+        """Lay the whole selection out as ONE SPREAD column on the line.
 
-        The horizontals (H/L, L/L) form the upper block, the risers (F/B, T/A)
-        a separate block below it, so the two families read apart. Each block
-        reuses its own layout: horizontals get the fanned L-leaders,
-        risers the drops onto their points. Either block is skipped when empty,
-        so an all-horizontal or all-riser selection degrades to a single block.
+        The user-approved model (placement-plan artifact v3, 2026-08-02):
+        every tag - AT H/L horizontals and F/B risers alike - sits ON the
+        drawn line, and the column SPREADS along it so each tag sits at its
+        own pipe's band instead of bunching at the top (the bunching funnelled
+        every leader through one corridor). Default rows: level with the pipe
+        for a screen-vertical run; one row ABOVE the pipe for screen-
+        horizontal runs and risers, so their leaders land with a visible
+        90-degree drop, arrow down. Rows push UP (never down) where the
+        default would clash, keeping pipe order - so each leader stays in its
+        own band and crossings remain impossible, while drops lengthen only
+        where the area is busy.
+
+        Formatting follows the Align Tags contract via the shared settings
+        file: row pitch = tallest drawn text height + the vertical_mm clear
+        gap, text left edges flush on the line (EDGE_LOW anchoring), angle-0
+        leader shapes (level straight leaders into screen-vertical runs,
+        90-degree turns onto screen-horizontal runs, drops onto riser points).
         """
         line = g['line']
         right, up = g['right'], g['up']
-        heads, bounds, pitch = g['heads'], g['bounds'], g['pitch']
+        heads, bounds = g['heads'], g['bounds']
         pipe_up, pipe_across = g['pipe_up'], g['pipe_across']
         pointlike, elements, count = g['pointlike'], g['elements'], g['count']
+        horizontal_flags = g['horizontal']
 
         line_top = max(utils.project(line.GetEndPoint(0), up),
                        utils.project(line.GetEndPoint(1), up))
-        block_gap = utils.paper_mm_to_model(view, config.AUTO_BLOCK_GAP_MM)
 
-        # In a plan every non-point pipe is a flat pipe that earns an L-leader;
-        # every point-like pipe is a riser. There is no third category here.
-        risers = [i for i in range(count) if pointlike[i]]
-        horizontals = [i for i in range(count) if not pointlike[i]]
-        leadered_flags = [not pointlike[i] for i in range(count)]
+        # Spacing from the SHARED Align Tags settings file (handoff s1/s3).
+        settings = engine_bridge.load_settings()
+        pitch = engine_bridge.row_pitch(bounds, view, settings)
+        step = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_STEP_MM)
+        clear = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_CLEAR_MM)
 
-        height_targets = {}
-        specs = []
-        top = line_top
+        # REACH: how far out from the tag column each target sits. `outward`
+        # points from the column towards the pipes, so a bigger reach is a
+        # target further away, whichever side the pipes are on.
+        column_across = _reference_coordinate_at(line, right, up, line_top)
+        mean_across = sum(pipe_across) / float(count) if count else 0.0
+        outward = 1.0 if mean_across >= column_across else -1.0
+        reach = [outward * (pipe_across[i] - column_across)
+                 for i in range(count)]
 
-        if horizontals:
-            h_targets, h_specs, h_bottom = self._horizontal_block(
-                line, right, up, view, pipe_up, pipe_across, leadered_flags,
-                elements, pitch, horizontals, top)
-            height_targets.update(h_targets)
-            specs.extend(h_specs)
-            top = h_bottom - pitch - block_gap
+        # Do the targets sit below the tag column or above it?
+        mean_up = sum(pipe_up) / float(count) if count else 0.0
+        column_centre = line_top - (count - 1) * pitch / 2.0
+        targets_below = mean_up <= column_centre
 
-        if risers:
-            r_targets, r_specs, _r_bottom = self._riser_block(
-                line, right, up, pipe_up, pipe_across, pointlike, pitch,
-                risers, top)
-            height_targets.update(r_targets)
-            specs.extend(r_specs)
+        # THE STAIRCASE (user markup, 2026-08-02): within a cluster, rows are
+        # ordered by REACH - the TOP tag takes the FARTHEST target and each tag
+        # below reaches one step nearer, so every leader nests inside the one
+        # above it. With the column right of the pipes and the pipes below (the
+        # usual case) this reads exactly as the user drew it: top-to-bottom in
+        # the column maps to left-to-right along the run.
+        #
+        # This is what makes crossing impossible, and it replaces ordering by
+        # pipe height - under that rule a long drop cut straight through the
+        # landings of the tags between it and its pipe.
+        #   * a landing never reaches a drop ABOVE it: those sit further out
+        #     than the landing itself ever travels;
+        #   * a landing never meets a drop BELOW it: each drop starts at its
+        #     own row, so none of it exists at a higher tag's height.
+        # When the targets sit ABOVE the column the staircase mirrors: the top
+        # tag takes the NEAREST target instead.
+        #
+        # sign is how the reach changes going DOWN one row: negative when the
+        # targets are below (the top row is farthest and each row steps in),
+        # positive when they are above. Sorting on sign*reach therefore puts
+        # the farthest target on the top row in the first case, the nearest in
+        # the second - the staircase in both.
+        sign = -1.0 if targets_below else 1.0
+
+        # CLUSTERS: one column for a whole floor makes every leader travel the
+        # height of the drawing. Tags whose targets chain within cluster_mm form
+        # a group, and each group's rows sit in ITS OWN pipes' band - so leaders
+        # stay short and local. It also keeps clusters from interfering: a
+        # cluster's leaders live inside its own band, so they never reach the
+        # rows or the drops of another band. Blocks are laid out top-down and
+        # pushed clear of each other, never above the drawn line.
+        targets = [(pipe_across[i], pipe_up[i]) for i in range(count)]
+        groups = engine_bridge.cluster_by_target(
+            list(range(count)), targets, settings)
+        groups.sort(key=lambda group:
+                    -sum(pipe_up[i] for i in group) / float(len(group)))
+
+        base_kinds = {}
+        for index in range(count):
+            if pointlike[index]:
+                base_kinds[index] = 'riser'
+            elif horizontal_flags[index]:
+                base_kinds[index] = 'horiz'
+            else:
+                base_kinds[index] = 'level'
+
+        # Anchors are read once: the audit re-runs the layout several times and
+        # must not pay for Revit geometry on every pass.
+        anchors_2d = []
+        for element in elements:
+            point = utils.get_element_anchor(element, view)
+            anchors_2d.append(None if point is None else
+                              (utils.project(point, right),
+                               utils.project(point, up)))
+
+        def _layout():
+            """Compute one complete arrangement (deterministic).
+
+            Levels place first with straight leaders (unchanged priority);
+            every other tag is seated by the exact-geometry greedy below, its
+            own placement gated by the same crossing checker the log uses.
+            """
+            kinds = dict(base_kinds)
+
+            # Each cluster splits by LEADER KIND, because the two kinds want
+            # opposite placements (user rule, 2026-08-02: "straight leader is the
+            # priority for the vertical pipes and the horizontal pipes with 90 deg
+            # leader to be adjusted accordingly"):
+            #   level block - screen-vertical runs. Its rows sit ON the pipes' own
+            #       band, so every leader is a straight level line into the pipe's
+            #       side. This placement wins; the drop blocks work around it.
+            #       Level leaders are all horizontal, so they can never cross.
+            #   drop block  - horizontal runs and risers. Its rows sit CLEAR of its
+            #       pipes so every drop in the block points the same way, which the
+            #       staircase proof depends on (a block inside its own band has
+            #       some drops going down and some up, and those cut each other's
+            #       landings - 17 crossings in the check that caught this).
+            # A vertical run only earns a straight leader if the whole block's rows
+            # fit INSIDE the pipes themselves. Short stubs cannot host a stack, and
+            # a "level" leader whose row runs off the end of its pipe gets clamped
+            # into a SLANT that cuts diagonally across every other leader (13
+            # crossings in the user's 2026-08-02 run, all traced to this). Those
+            # blocks become 90-degree drops instead, which is what a short stub
+            # wants anyway.
+            blocks = []
+            overlaps = {}
+            for group in groups:
+                level_members = [i for i in group if kinds[i] == 'level']
+                drop_members = [i for i in group if kinds[i] != 'level']
+                if level_members:
+                    spans = [utils.get_curve_span(elements[i], up)
+                             for i in level_members]
+                    usable = [s for s in spans if s is not None]
+                    room = -1.0
+                    if len(usable) == len(level_members) and usable:
+                        low = max(s[0] for s in usable) + clear
+                        high = min(s[1] for s in usable) - clear
+                        room = high - low
+                        overlaps[id(level_members)] = (low, high)
+                    if room < (len(level_members) - 1) * pitch:
+                        for index in level_members:
+                            kinds[index] = 'horiz'
+                        drop_members = drop_members + level_members
+                        level_members = []
+                if level_members:
+                    blocks.append((level_members, True))
+                if drop_members:
+                    blocks.append((drop_members, False))
+            blocks.sort(key=lambda block:
+                        -sum(pipe_up[i] for i in block[0]) / float(len(block[0])))
+
+            height_targets = {}
+            drop_reach = {}
+            order = []
+            occupied = []       # (low, high) level-block bands already taken
+            block_of = {}       # tag index -> the block that placed it
+
+            def _free(low, high):
+                """True if this band overlaps no block already placed.
+
+                Bands carry half a pitch of padding, so this is the test for "can
+                a block's rows sit here without touching another block's rows".
+                """
+                for taken_low, taken_high in occupied:
+                    if not (high < taken_low or low > taken_high):
+                        return False
+                return True
+
+            def _snap(value):
+                """Put a row on the shared pitch lattice measured from the line.
+
+                Every block lands on the same ladder of rows, so the gap between
+                any two tags in the finished column is an exact multiple of the
+                pitch instead of an arbitrary offset - which is what made the
+                spacing read as ragged (277mm here, 2030mm there).
+                """
+                return line_top - round((line_top - value) / pitch) * pitch
+
+            def _assign_level(local, top, block_index):
+                """Give a LEVEL block its rows from `top` down: straight leaders."""
+                for row, index in enumerate(local):
+                    height_targets[index] = top - row * pitch
+                    drop_reach[index] = reach[index]
+                    block_of[index] = block_index
+                order.extend(local)
+                occupied.append((top - (len(local) - 1) * pitch - pitch / 2.0,
+                                 top + pitch / 2.0))
+
+            # --- phase 1: the straight leaders, placed first (the priority) ---
+            # A vertical run's tag sits ON its pipe's band, so the leader is a dead
+            # level line into the pipe's side. Level leaders are all horizontal, so
+            # they can never cross each other - which is why they can claim their
+            # positions first and let the drops work around them.
+            for block_index, (members, is_level) in enumerate(blocks):
+                if not is_level:
+                    continue
+                # Level leaders are horizontal lines - they physically cannot cross
+                # each other - so this block needs no staircase and reads in plain
+                # drawing order instead: LEFTMOST pipe on the top row, the same
+                # convention Align Tags uses for a vertical bundle.
+                local = sorted(members, key=lambda i: (pipe_across[i], -pipe_up[i]))
+                span_v = (len(local) - 1) * pitch
+                # Centre the rows in the pipes' SHARED extent, so every row lands on
+                # every pipe and each leader is truly level.
+                shared = overlaps.get(id(members))
+                if shared is not None:
+                    band = (shared[0] + shared[1]) / 2.0
+                else:
+                    band = sum(pipe_up[i] for i in members) / float(len(local))
+                top = band + span_v / 2.0
+                # Sit on the shared lattice when the pipes still cover every row;
+                # a straight leader must not be traded for tidy spacing.
+                snapped = _snap(top)
+                if shared is None or (snapped <= shared[1]
+                                      and snapped - span_v >= shared[0]):
+                    top = snapped
+                for _try in range(_SLOT_TRIES):
+                    if _free(top - span_v, top):
+                        break
+                    top -= pitch      # two level bands overlap: slide clear
+                _assign_level(local, top, block_index)
+
+            # --- phase 2: the exact-geometry greedy (audit-verified winner) ---
+            # The multi-agent audit on the two logged runs (2026-08-03) derived
+            # the EXACT pairwise non-crossing condition and refuted every proxy:
+            # with one column and 90-degree leaders, the ONLY possible crossing
+            # is a landing (or level line) whose row lies inside another
+            # leader's drop band while that drop sits NEARER the column.
+            # Landings are mutually parallel; drops are mutually parallel;
+            # nothing else can touch. So for a tag at row r the whole rule
+            # collapses to an interval [LB, UB] of allowed drop positions, and
+            # a tag simply takes the nearest lattice row where that interval is
+            # non-empty. No staircase, no side-flips, no slabs: feasibility is
+            # computed, never assumed. Rows extend DOWNWARD as far as needed
+            # (user-sanctioned); the drawn line's top is a hard wall.
+            level_rows = [(height_targets[i], reach[i]) for i in order]
+            placed = []     # (index, row_v, drop, band_low, band_high)
+
+            def _span_reach(index):
+                """The tag's allowed drop range along its own pipe (reach)."""
+                if kinds[index] != 'horiz':
+                    return reach[index], reach[index]
+                span = utils.get_curve_span(elements[index], right)
+                if span is None:
+                    return reach[index], reach[index]
+                low = outward * (span[0] - column_across)
+                high = outward * (span[1] - column_across)
+                low, high = min(low, high) + clear, max(low, high) - clear
+                if low > high:
+                    low = high = (low + high) / 2.0
+                return low, high
+
+            def _interval(index, row):
+                """[LB, UB] of drop positions that cross NOTHING at this row.
+
+                LB: this tag's drop must sit FURTHER out than every leader
+                whose row its band passes (their landings stop short of it).
+                UB: this tag's row must not sit inside the band of any drop
+                that is NEARER the column than its own.
+                """
+                pipe_v = pipe_up[index]
+                band_low, band_high = ((row, pipe_v) if row < pipe_v
+                                       else (pipe_v, row))
+                lower, upper = _span_reach(index)
+                for level_v, level_reach in level_rows:
+                    if band_low < level_v < band_high:
+                        lower = max(lower, level_reach + clear)
+                for _j, row_j, drop_j, b_low, b_high in placed:
+                    if band_low < row_j < band_high:
+                        lower = max(lower, drop_j + clear)
+                    if b_low < row < b_high:
+                        upper = min(upper, drop_j - clear)
+                return lower, upper
+
+            def _taken_rows():
+                return [height_targets[i] for i in order]
+
+            # Screen-vertical pipes are OBSTACLES for drops: a drop at (or
+            # within `clear` of) a vertical pipe's own u runs COLLINEAR with
+            # that pipe - the checker scores parallel overlap as zero
+            # crossings, but on paper the leader is buried inside the bundle
+            # (the user's 2026-08-03 report: three leaders riding the pipes
+            # at u=58446/58632). Collected from the level tags' real spans.
+            vertical_pipes = []
+            for i in range(count):
+                if base_kinds[i] != 'level':
+                    continue
+                span_v = utils.get_curve_span(elements[i], up)
+                if span_v is None:
+                    span_v = (pipe_up[i], pipe_up[i])
+                vertical_pipes.append((reach[i], span_v[0], span_v[1]))
+
+            def _dodge_pipes(index, row, drop, lower, upper):
+                """Nudge a drop off any vertical pipe its v-range overlaps."""
+                pipe_v = pipe_up[index]
+                b_low, b_high = ((row, pipe_v) if row < pipe_v
+                                 else (pipe_v, row))
+                for pipe_reach, v_low, v_high in vertical_pipes:
+                    if v_high < b_low or v_low > b_high:
+                        continue
+                    if abs(drop - pipe_reach) < clear:
+                        if pipe_reach + clear <= upper:
+                            drop = pipe_reach + clear
+                        elif pipe_reach - clear >= lower:
+                            drop = pipe_reach - clear
+                return drop
+
+            def _row_cost(row, base):
+                # Nearest to the pipe wins; rows above it pay one pitch, so
+                # the column prefers to grow downward.
+                return abs(row - base) + (pitch if row > base else 0.0)
+
+            def _candidate_rows(index, taken, near_limit=None):
+                """Free lattice rows for this tag, best (nearest) first.
+
+                `near_limit` keeps rows at least that far from the tag's own
+                pipe - passed as min_drop when a 90-degree leader must show a
+                readable vertical segment (user rule 2026-08-03).
+                """
+                base = pipe_up[index]
+                limit = clear if near_limit is None else near_limit
+                start = _snap(base)
+                rows = [start]
+                for k in range(1, _SLOT_TRIES):
+                    rows.append(start - k * pitch)
+                    rows.append(start + k * pitch)
+                rows.sort(key=lambda r: _row_cost(r, base))
+                for row in rows:
+                    if row > line_top + 1e-9:
+                        continue        # hard wall: never above the line
+                    if abs(row - base) < limit:
+                        continue        # too close to read as a drop
+                    if any(abs(row - t) < pitch - 1e-6 for t in taken):
+                        continue
+                    yield row
+
+            def _place(index, row, drop):
+                pipe_v = pipe_up[index]
+                band = ((row, pipe_v) if row < pipe_v else (pipe_v, row))
+                placed.append((index, row, drop, band[0], band[1]))
+                height_targets[index] = row
+                drop_reach[index] = drop
+                block_of[index] = -1
+                order.append(index)
+
+            def _unplace(index):
+                for position, entry in enumerate(placed):
+                    if entry[0] == index:
+                        placed.pop(position)
+                        break
+                height_targets.pop(index, None)
+                drop_reach.pop(index, None)
+                block_of.pop(index, None)
+                if index in order:
+                    order.remove(index)
+
+            def _leader_triple(index):
+                """This tag's leader as 2D points, for the real checker."""
+                row = height_targets[index]
+                if kinds[index] == 'level':
+                    arrow_u = pipe_across[index]
+                    return ((column_across, row),
+                            ((column_across + arrow_u) / 2.0, row),
+                            (arrow_u, row))
+                drop_u = column_across + outward * drop_reach[index]
+                if kinds[index] == 'riser':
+                    anchor = anchors_2d[index]
+                    tip = (anchor if anchor is not None
+                           else (drop_u, pipe_up[index]))
+                    return ((column_across, row),
+                            (pipe_across[index], row), tip)
+                return ((column_across, row), (drop_u, row),
+                        (drop_u, pipe_up[index]))
+
+            def _real_crossings():
+                leaders = dict((i, _leader_triple(i)) for i in order)
+                return len(diagnostics.find_crossings(leaders))
+
+            horiz_tags = [i for i in range(count) if kinds[i] != 'level']
+            sequence = sorted(horiz_tags, key=lambda i: (reach[i], i))
+
+            # Greedy with promote-and-retry: short landings place first (their
+            # bands block least); a tag that finds no feasible row anywhere is
+            # the most constrained, so it goes to the FRONT and the pass
+            # restarts. The audit measured dataset A converging with no
+            # retries and B with one.
+            def _clear_of_pipes(index, row, drop):
+                """True if this drop overlaps no vertical pipe's line."""
+                return abs(_dodge_pipes(index, row, drop, drop, drop)
+                           - drop) < 1e-9
+
+            # A 90-degree drop must be long enough to READ as a drop
+            # (user rule 2026-08-03: "some leader length minimal in the
+            # 90 deg leader") - one row by default, config.AUTO_MIN_DROP_ROWS.
+            min_drop = max(clear, config.AUTO_MIN_DROP_ROWS * pitch)
+
+            def _seat_exact(index):
+                """Try to seat one tag by the exact rule. True on success.
+
+                Four preference tiers, best first: a full visible drop AND
+                clear of every vertical pipe; then clear-of-pipes with a
+                short drop; then a full drop that may ride; then anything
+                feasible - completeness always beats aesthetics, and the
+                reframe pass repairs what the lower tiers accepted.
+                """
+                taken = _taken_rows()
+                for near_limit, need_clear in ((min_drop, True),
+                                               (clear, True),
+                                               (min_drop, False),
+                                               (clear, False)):
+                    for row in _candidate_rows(index, taken, near_limit):
+                        lower, upper = _interval(index, row)
+                        if kinds[index] == 'riser':
+                            if lower - 1e-9 <= reach[index] <= upper + 1e-9:
+                                _place(index, row, reach[index])
+                                return True
+                        elif lower <= upper + 1e-9:
+                            drop = _dodge_pipes(
+                                index, row,
+                                min(max(reach[index], lower), upper),
+                                lower, upper)
+                            if need_clear and not _clear_of_pipes(index, row,
+                                                                  drop):
+                                continue
+                            _place(index, row, drop)
+                            return True
+                return False
+
+            skipped = []
+            for _retry in range(min(len(sequence), 8) + 1):
+                for entry in list(placed):
+                    _unplace(entry[0])
+                skipped = []
+                failed = None
+                for index in sequence:
+                    if _seat_exact(index):
+                        continue
+                    if sequence and sequence[0] == index:
+                        skipped.append(index)   # promoted and STILL stuck
+                    else:
+                        failed = index
+                        break
+                if failed is None:
+                    break
+                sequence.remove(failed)
+                sequence.insert(0, failed)
+
+            # COMPLETENESS - every tag gets a row, no matter what. The retry
+            # budget can exhaust MID-PASS, abandoning the tail of the sequence
+            # unplaced: on the first field run 26 of 40 tags were left sitting
+            # wherever Revit created them, scattered across the drawing. Any
+            # tag still without a row gets one more exact-rule attempt (the
+            # board has filled since its pass, so feasibility may have
+            # changed), and whatever remains joins the checker-scored
+            # fallback below. Nothing is ever left behind again.
+            for index in sequence:
+                if index in height_targets or index in skipped:
+                    continue
+                if not _seat_exact(index):
+                    skipped.append(index)
+
+            # Checker-scored fallback for anything the exact rule could not
+            # seat (a zero provably does not exist for it): take the
+            # (row, drop) the REAL checker scores lowest. Deterministic and
+            # bounded at 120 checker calls per tag.
+            for index in skipped:
+                if index in height_targets:
+                    continue        # seated by a later completeness pass
+                taken = _taken_rows()
+                span_low, span_high = _span_reach(index)
+                base = pipe_up[index]
+                start = _snap(base)
+                rows = [start]
+                for k in range(1, _SLOT_TRIES):
+                    rows.append(start - k * pitch)
+                    rows.append(start + k * pitch)
+                rows.sort(key=lambda r: _row_cost(r, base))
+                best_choice = None
+                tried = 0
+                for row in rows:
+                    if tried >= 120:
+                        break
+                    if row > line_top + 1e-9 or abs(row - base) < clear:
+                        continue
+                    if any(abs(row - t) < pitch - 1e-6 for t in taken):
+                        continue
+                    lower, upper = _interval(index, row)
+                    drops = [min(max(reach[index], span_low), span_high),
+                             span_low, span_high]
+                    if lower <= upper + 1e-9:
+                        drops.append(min(max(reach[index], lower), upper))
+                    drops = [_dodge_pipes(index, row, d, span_low, span_high)
+                             for d in drops]
+                    for drop in drops:
+                        if tried >= 120:
+                            break
+                        tried += 1
+                        _place(index, row, drop)
+                        score = (_real_crossings(), _row_cost(row, base))
+                        _unplace(index)
+                        if best_choice is None or score < best_choice[0]:
+                            best_choice = (score, row, drop)
+                    if best_choice is not None and best_choice[0][0] == 0:
+                        break
+                if best_choice is not None:
+                    _place(index, best_choice[1], best_choice[2])
+                    if best_choice[0][0]:
+                        utils.logger.debug(
+                            'Auto Tag: tag {0} seated with {1} unavoidable '
+                            'crossing(s).'.format(index, best_choice[0][0]))
+                else:
+                    # Last resort: below everything, clamped onto its pipe.
+                    # A tag in a suboptimal row is recoverable; a tag never
+                    # placed at all is the scatter the user photographed.
+                    bottom = min([line_top] + _taken_rows()) - pitch
+                    _place(index, _snap(bottom),
+                           min(max(reach[index], span_low), span_high))
+
+            # --- REFRAME: the tool re-reads its own drawing and corrects ---
+            # (user direction 2026-08-03: "it has to think and reframe the
+            # tags after the first placement... as per the specific area").
+            # After placing, the layout critiques itself with the same
+            # geometry the log publishes and re-seats what fails the read:
+            #   stage 1 - every 90-degree leader gets a VISIBLE drop. A tag
+            #       seated closer to its pipe than min_drop moves to the
+            #       nearest row a full drop away, which naturally spends any
+            #       vacant stretch of the column beside it.
+            #   stage 2 - the longest leaders pull nearer, never below
+            #       min_drop, so the polish can't recreate a short drop.
+            # Every accepted move is gated by the REAL crossing checker.
+            baseline = _real_crossings()
+
+            def _try_rows(index, rows_iterable, cap):
+                """Trial-move a tag; keep the first checker-approved row."""
+                base = pipe_up[index]
+                tried = 0
+                for row in rows_iterable:
+                    if tried >= cap:
+                        break
+                    tried += 1
+                    snapshot = (list(placed), dict(height_targets),
+                                dict(drop_reach), list(order))
+                    for position, entry in enumerate(placed):
+                        if entry[0] == index:
+                            band = ((row, base) if row < base
+                                    else (base, row))
+                            placed[position] = (index, row,
+                                                drop_reach[index],
+                                                band[0], band[1])
+                            height_targets[index] = row
+                            break
+                    # Fixed-point relax: every drop settles into its interval.
+                    for _pass in range(6):
+                        for position, entry in enumerate(placed):
+                            j = entry[0]
+                            if kinds[j] == 'riser':
+                                continue
+                            lower, upper = _interval(j, entry[1])
+                            if lower <= upper + 1e-9:
+                                new_drop = min(max(drop_reach[j], lower),
+                                               upper)
+                                new_drop = _dodge_pipes(j, entry[1],
+                                                        new_drop, lower,
+                                                        upper)
+                                drop_reach[j] = new_drop
+                                placed[position] = (j, entry[1], new_drop,
+                                                    entry[3], entry[4])
+                    feasible = True
+                    for entry in placed:
+                        j = entry[0]
+                        if kinds[j] == 'riser':
+                            continue
+                        lower, upper = _interval(j, entry[1])
+                        if not (lower - 1e-9 <= drop_reach[j]
+                                <= upper + 1e-9):
+                            feasible = False
+                            break
+                    if feasible and _real_crossings() <= baseline:
+                        return True
+                    placed[:] = snapshot[0]
+                    height_targets.clear()
+                    height_targets.update(snapshot[1])
+                    drop_reach.clear()
+                    drop_reach.update(snapshot[2])
+                    order[:] = snapshot[3]
+                return False
+
+            # Stage 1: visible drops (spends the vacant column space).
+            for _sweep in range(20):
+                violators = [entry[0] for entry in placed
+                             if abs(height_targets[entry[0]]
+                                    - pipe_up[entry[0]]) < min_drop - 1e-6]
+                if not violators:
+                    break
+                moved_any = False
+                for index in violators:
+                    taken = [value for i2, value in height_targets.items()
+                             if i2 != index]
+                    if _try_rows(index,
+                                 _candidate_rows(index, taken, min_drop),
+                                 30):
+                        moved_any = True
+                if not moved_any:
+                    break
+
+            # Stage 2: pull the worst-verticality tag nearer, min_drop kept.
+            for _sweep in range(30):
+                if not placed:
+                    break
+                worst = max(placed,
+                            key=lambda entry: abs(entry[1]
+                                                  - pipe_up[entry[0]]))
+                index = worst[0]
+                base = pipe_up[index]
+                current_cost = _row_cost(height_targets[index], base)
+                taken = [value for i2, value in height_targets.items()
+                         if i2 != index]
+
+                def _nearer_only(rows_iterable, limit_cost, pipe_v):
+                    for row in rows_iterable:
+                        if _row_cost(row, pipe_v) >= limit_cost:
+                            return      # sorted: nothing nearer remains
+                        yield row
+
+                if not _try_rows(index,
+                                 _nearer_only(
+                                     _candidate_rows(index, taken, min_drop),
+                                     current_cost, base),
+                                 30):
+                    break
+
+            # Leader specs, by what the target IS on screen:
+            #   riser point            -> landing + drop onto the point
+            #   run horizontal         -> landing + true 90-degree drop at its
+            #                             staircase position along the run
+            #   run vertical on screen -> ONE straight level leader at the tag's
+            #                             row height, into the pipe's side
+            specs = []
+            for index in order:
+                kind = kinds[index]
+                if kind == 'riser':
+                    specs.append(('riser', index))
+                elif kind == 'horiz':
+                    specs.append(('horiz', index,
+                                  column_across + outward * drop_reach[index]))
+                else:
+                    span = utils.get_curve_span(elements[index], up)
+                    row_v = height_targets[index]
+                    if span is not None:
+                        low, high = span[0] + clear, span[1] - clear
+                        arrow_v = (min(max(row_v, low), high) if low <= high
+                                   else (span[0] + span[1]) / 2.0)
+                    else:
+                        arrow_v = pipe_up[index]
+                    specs.append(('level', index, arrow_v))
+
+            return {'kinds': kinds, 'height': height_targets,
+                    'drop': drop_reach, 'order': order, 'specs': specs,
+                    'block_of': block_of}
+
+        # --- the audit: plot it, look for crossovers, rethink, correct ------
+        # An arrangement can be locally right and still tangle where two
+        # clusters meet, and no amount of forward reasoning catches every case.
+        # So the layout is CHECKED against the same geometric test the log
+        # publishes, and when a crossing is found the tool changes its mind:
+        # the block responsible is re-planned on the other side of its pipes
+        # and the whole arrangement is scored again. It keeps the best of
+        # everything it tried, so a repair can never make the drawing worse.
+        def _audit(layout):
+            """Return the crossings this arrangement would actually draw."""
+            leaders = {}
+            for spec in layout['specs']:
+                index = spec[1]
+                row_v = layout['height'][index]
+                head_u = _reference_coordinate_at(line, right, up, row_v)
+                anchor = anchors_2d[index]
+                if spec[0] == 'riser':
+                    if anchor is None:
+                        continue
+                    leaders[index] = ((head_u, row_v),
+                                      (pipe_across[index], row_v), anchor)
+                elif spec[0] == 'horiz':
+                    turn_u = spec[2]
+                    leaders[index] = ((head_u, row_v), (turn_u, row_v),
+                                      (turn_u, pipe_up[index]))
+                else:
+                    arrow_u = anchor[0] if anchor else pipe_across[index]
+                    leaders[index] = ((head_u, row_v),
+                                      ((head_u + arrow_u) / 2.0, row_v),
+                                      (arrow_u, spec[2]))
+            return diagnostics.find_crossings(leaders)
+
+        # One deterministic pass: the layout gates every placement with the
+        # real crossing checker itself, so the old flip-and-retry audit loop
+        # is gone - _audit stays as the independent self-check for the log.
+        layout = _layout()
+        crossings = _audit(layout)
+        audit_trail = [(0, len(crossings))]
+        kinds = layout['kinds']
+        height_targets = layout['height']
+        drop_reach = layout['drop']
+        order = layout['order']
+        specs = layout['specs']
 
         moves, new_heads = self._assemble_moves(
             tags, line, right, up, heads, bounds, height_targets)
-        context['leader_plan'] = self._build_leader_plan(
+        plan = self._build_leader_plan(
             specs, tags, view, new_heads, right, up, pipe_up, pipe_across,
             elements)
+        context['leader_plan'] = plan
+
+        # Record what was decided and drawn, and let the run grade itself.
+        if config.AUTO_LOG_ENABLED:
+            self._log_run(
+                view, settings, pitch, column_across, line_top, outward,
+                targets_below, tags, elements, kinds, pipe_up, pipe_across,
+                reach, drop_reach, height_targets, order, new_heads, plan,
+                right, up, audit_trail)
         return moves
+
+    @staticmethod
+    def _log_run(view, settings, pitch, column_across, line_top, outward,
+                 targets_below, tags, elements, kinds, pipe_up, pipe_across,
+                 reach, drop_reach, height_targets, order, new_heads, plan,
+                 right, up, audit_trail=None):
+        """Write the diagnostic log for this run (never fatal)."""
+        try:
+            index_of = {}
+            for index, tag in enumerate(tags):
+                index_of[utils.element_id_value(tag.Id)] = index
+
+            leaders = {}
+            for tag, elbow, arrow in plan:
+                index = index_of.get(utils.element_id_value(tag.Id))
+                head = new_heads.get(index) if index is not None else None
+                if head is None:
+                    continue
+                leaders[index] = (
+                    (utils.project(head, right), utils.project(head, up)),
+                    (utils.project(elbow, right), utils.project(elbow, up)),
+                    (utils.project(arrow, right), utils.project(arrow, up)))
+
+            crossings = diagnostics.write_run(
+                view, settings, pitch, column_across, line_top, outward,
+                targets_below, tags, elements, kinds, pipe_up, pipe_across,
+                reach, drop_reach, height_targets, order, leaders,
+                audit_trail)
+            if crossings > 0:
+                utils.logger.warning(
+                    'Auto Tag: {0} leader crossing(s) - see {1}'.format(
+                        crossings, diagnostics.log_path()))
+        except Exception as ex:
+            utils.logger.debug('Auto Tag logging skipped: {0}'.format(ex))
 
 
 class ClusterReferenceLineLeft(_ClusterReferenceLine):

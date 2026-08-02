@@ -34,6 +34,7 @@ from Autodesk.Revit.DB.Plumbing import Pipe
 
 import alignment
 import config
+import engine_bridge
 import leader_manager
 import runs
 import selection
@@ -351,8 +352,17 @@ def main():
             # else keeps the clean toggle-rebuild. Managed tags are skipped by
             # maintain() so their elbows are not wiped.
             plan = context.get('leader_plan') or []
+            engine_plan = context.get('engine_leader_plan') or []
             managed = set(utils.element_id_value(tag.Id)
-                          for tag, _elbow, _arrow in plan)
+                          for tag, _elbow, _arrow in plan + engine_plan)
+
+            # Engine-planned leaders (the Auto method's horizontals) pin their
+            # arrows exactly where the engine put them when the shared
+            # attached_end setting says so (handoff s1/s3); riser drops and
+            # fallback leaders keep the configured behaviour.
+            correct = context.get('auto_correct')
+            engine_pinned = bool(
+                (correct or {}).get('settings', {}).get('attached_end', True))
 
             leaders_updated = 0
             leader_failures = []
@@ -361,12 +371,40 @@ def main():
                     plan, free_end=config.HORIZONTAL_LEADER_FREE_END)
                 leaders_updated += set_count
                 leader_failures.extend(elbow_failures)
+            if engine_plan:
+                set_count, elbow_failures = leaders.apply_elbows(
+                    engine_plan, free_end=engine_pinned)
+                leaders_updated += set_count
+                leader_failures.extend(elbow_failures)
 
             rest = [tag for tag in tags
                     if utils.element_id_value(tag.Id) not in managed]
             refreshed, refresh_failures = leaders.maintain(rest)
             leaders_updated += refreshed
             leader_failures.extend(refresh_failures)
+
+            # --- verify-correct (docs/autotag-align-handoff.md s4.3) ------
+            # The tag family re-anchors its text with the leader state, so the
+            # Auto method measures the DRAWN corner and re-plans once with the
+            # residual - still inside this transaction, one undo step. On a
+            # clean re-run the residual is under tolerance and nothing moves
+            # (handoff s5.5).
+            if correct:
+                doc.Regenerate()
+                fix_moves, fix_plan = engine_bridge.correct_placement(
+                    correct['states'], correct['tags'], correct['elements'],
+                    view, *utils.get_view_axes(view),
+                    settings=correct['settings'])
+                if fix_moves:
+                    for tag, position in fix_moves:
+                        try:
+                            tag.TagHeadPosition = position
+                        except Exception as ex:
+                            logger.debug('Correction move failed: {}'.format(ex))
+                    doc.Regenerate()
+                    set_count, elbow_failures = leaders.apply_elbows(
+                        fix_plan, free_end=engine_pinned)
+                    leader_failures.extend(elbow_failures)
 
             transaction.Commit()
         failures.extend(move_failures)
