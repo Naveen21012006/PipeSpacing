@@ -25,9 +25,15 @@ Read `%APPDATA%\CKR\tag_align_settings.json` at run time (via the sibling
 dialog; both tools must follow. Fallback defaults (the user's approved
 values) only when the file is missing:
 
+**Exception — `angle_deg` is NOT shared (user decision, 2026-08-02):** Auto
+Tag pins the angle to **0 permanently** and ignores the file's `angle_deg`.
+Angled alignment is a deliberate manual act the user performs with Align
+Tags; if they set the dialog to 45° for such a session, Auto Tag must keep
+producing angle-0 stacks. Pass a literal `0.0` to `plan_ordered`, always.
+
 | key | value | meaning — read carefully |
 |---|---|---|
-| `angle_deg` | **0** | straight-leader ruleset (§3). Not "horizontal only" — a full shape system |
+| `angle_deg` | **always 0 — do not read** | straight-leader ruleset (§3). Not "horizontal only" — a full shape system. Pinned; see above |
 | `landing_mm` | **1524** | horizontal run from text before a bend; also the anchor offset (§2) |
 | `vertical_mm` | **100** | **CLEAR GAP between texts, not row pitch.** Row pitch = tallest drawn text height + this. Your bridge currently passes it as centre-to-centre pitch — that stacks rows overlapping |
 | `horizontal_mm` | 50 | column offset for Intermittent only; inert at these defaults |
@@ -118,8 +124,10 @@ log-proven; your bridge currently trips on the first one:
 
 ## 5 · Acceptance (mirror of the user's sign-off on Align Tags)
 
-1. A stack Auto Tag places and a stack Align Tags places on the same bundle
-   are visually identical: same datum edge, shapes, pitch, fans.
+1. A stack Auto Tag places and a stack Align Tags places (at angle 0) on the
+   same bundle are visually identical: same datum edge, shapes, pitch, fans.
+1b. With the dialog set to angle 45, Auto Tag STILL produces angle-0 stacks —
+   the pinned angle survives any settings-file value.
 2. Text left edges flush on one column, both sides of the pipes; ragged
    edges never face a flush requirement.
 3. No leader drawn along a pipe; horizontal runs get true 90° bends;
