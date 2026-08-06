@@ -1,0 +1,3 @@
+title: Purge Orphaned Tags
+tooltip: "Find and delete the tags in the active view that point at elements which no longer exist - what a reissued link leaves behind. Lists them first, deletes on confirmation in one undo step, and touches nothing else."
+author: Naveen
