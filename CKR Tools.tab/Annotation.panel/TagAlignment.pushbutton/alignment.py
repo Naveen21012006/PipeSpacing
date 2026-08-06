@@ -22,7 +22,7 @@ Only tag heads are moved. MEP elements are never touched.
 
 from collections import OrderedDict
 
-import config
+import tool_config as config
 import diagnostics
 import engine_bridge
 import utils
@@ -765,6 +765,20 @@ class _ClusterReferenceLine(AlignmentStrategy):
         step = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_STEP_MM)
         clear = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_CLEAR_MM)
 
+        # VISION (user-approved 2026-08-03): the pre-placement ink map, when
+        # script.py captured one. Row scoring adds a penalty proportional to
+        # how much ink already sits where the tag's TEXT would go, so tags
+        # prefer blank paper - dimensions, notes, walls and unselected pipes
+        # repel them even though the geometric model knows nothing of those.
+        ink_map = context.get('ink_map')
+        ink_weight = config.AUTO_INK_WEIGHT_ROWS
+        widths = [s[0][1] - s[0][0] for s in bounds.values() if s and s[0]]
+        heights = [s[1][1] - s[1][0] for s in bounds.values() if s and s[1]]
+        text_w = sorted(widths)[len(widths) // 2] if widths else 4.0 * pitch
+        text_h = (sorted(heights)[len(heights) // 2] if heights
+                  else 0.8 * pitch)
+        _ink_cache = {}
+
         # REACH: how far out from the tag column each target sits. `outward`
         # points from the column towards the pipes, so a bigger reach is a
         # target further away, whichever side the pipes are on.
@@ -1046,10 +1060,23 @@ class _ClusterReferenceLine(AlignmentStrategy):
                             drop = pipe_reach - clear
                 return drop
 
+            def _row_ink(row):
+                """Ink fraction under the tag text at this row (cached)."""
+                key = int(round((line_top - row) / pitch))
+                if key not in _ink_cache:
+                    _ink_cache[key] = ink_map.ink_fraction(
+                        column_across, column_across + text_w,
+                        row - text_h / 2.0, row + text_h / 2.0)
+                return _ink_cache[key]
+
             def _row_cost(row, base):
                 # Nearest to the pipe wins; rows above it pay one pitch, so
-                # the column prefers to grow downward.
-                return abs(row - base) + (pitch if row > base else 0.0)
+                # the column prefers to grow downward; inked paper repels the
+                # text in proportion to how much already sits there.
+                cost = abs(row - base) + (pitch if row > base else 0.0)
+                if ink_map is not None and ink_weight > 0.0:
+                    cost += ink_weight * pitch * _row_ink(row)
+                return cost
 
             def _candidate_rows(index, taken, near_limit=None):
                 """Free lattice rows for this tag, best (nearest) first.

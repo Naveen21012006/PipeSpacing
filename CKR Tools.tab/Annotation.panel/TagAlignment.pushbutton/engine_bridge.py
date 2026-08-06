@@ -112,6 +112,36 @@ def _settings_path():
     return os.path.join(base, 'CKR', 'tag_align_settings.json')
 
 
+def _local_path():
+    """Auto Tag's OWN settings file (overrides, not shared with Align Tags)."""
+    base = os.environ.get('APPDATA') or os.environ.get('LOCALAPPDATA') or ''
+    return os.path.join(base, 'CKR', 'autotag_settings.json')
+
+
+def load_local():
+    """Return Auto Tag's local overrides ({} when none set)."""
+    try:
+        with open(_local_path(), 'r') as handle:
+            raw = json.load(handle)
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_local(values):
+    """Persist Auto Tag's local overrides. Never raises."""
+    try:
+        directory = os.path.dirname(_local_path())
+        if directory and not os.path.isdir(directory):
+            os.makedirs(directory)
+        with open(_local_path(), 'w') as handle:
+            json.dump(values, handle, indent=2, sort_keys=True)
+        return True
+    except Exception as ex:
+        utils.logger.debug('Local settings save failed: {0}'.format(ex))
+        return False
+
+
 def load_settings():
     """Return the shared dialog settings, the file's values over the defaults.
 
@@ -119,6 +149,10 @@ def load_settings():
     Align Tags' settings.load() drops (e.g. learned_left_mm). angle_deg is never
     read - the caller always passes 0.0 (handoff s1). Independent of the engine
     import, so the pitch still follows the shared file even in fallback mode.
+
+    Auto Tag's LOCAL overrides (Shift+click on the button) sit on top: a
+    vertical_mm set there beats the shared file, so the text gap can be tuned
+    per-tool without touching the Align Tags dialog.
     """
     values = dict(_FALLBACK_SETTINGS)
     try:
@@ -130,18 +164,37 @@ def load_settings():
                     values[key] = raw[key]
     except Exception:
         pass  # missing / corrupt -> the approved defaults
+
+    local = load_local()
+    try:
+        if 'vertical_mm' in local:
+            values['vertical_mm'] = float(local['vertical_mm'])
+    except Exception:
+        pass
+    try:
+        if 'gap_paper_mm' in local:
+            values['gap_paper_mm'] = float(local['gap_paper_mm'])
+    except Exception:
+        pass
     return values
 
 
 def row_pitch(bounds, view, settings):
     """Return the centre-to-centre row pitch (model feet), per handoff s3.
 
-    Pitch = tallest DRAWN text height + vertical_mm CLEAR GAP. vertical_mm is a
-    model distance (Align Tags uses mm_to_feet, not paper-scaled), added to the
-    measured text height (also model). When nothing could be measured, a
-    multi-line height estimate stands in so the rows never overlap.
+    Pitch = tallest DRAWN text height + the CLEAR GAP between texts. The gap
+    comes from Auto Tag's local ``gap_paper_mm`` when set - PAPER millimetres,
+    multiplied by the view scale, so "2 mm" reads as 2 mm on the printed sheet
+    at any scale. Without it, the shared Align Tags ``vertical_mm`` applies
+    with its original semantics (MODEL mm - at 1:100 a value of 100 is just
+    1 mm on paper, which is why the local control exists). When nothing could
+    be measured, a multi-line height estimate stands in so rows never overlap.
     """
-    gap = utils.mm_to_feet(float(settings.get('vertical_mm', 100.0)))
+    paper_gap = settings.get('gap_paper_mm')
+    if paper_gap is not None:
+        gap = utils.paper_mm_to_model(view, float(paper_gap))
+    else:
+        gap = utils.mm_to_feet(float(settings.get('vertical_mm', 100.0)))
     heights = []
     for spans in bounds.values():
         span_v = spans[1] if spans else None

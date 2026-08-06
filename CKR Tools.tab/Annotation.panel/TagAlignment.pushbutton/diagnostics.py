@@ -147,8 +147,12 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
 
         add('=== CKR Auto Tag =====================================')
         add('view   {0}   scale 1:{1}'.format(view_name, scale))
-        add('rule   pitch {0:.0f}mm   landing {1}mm   gap {2}mm'.format(
-            _mm(pitch), settings.get('landing_mm'), settings.get('vertical_mm')))
+        if settings.get('gap_paper_mm') is not None:
+            gap_text = '{0}mm PAPER'.format(settings.get('gap_paper_mm'))
+        else:
+            gap_text = '{0}mm model'.format(settings.get('vertical_mm'))
+        add('rule   pitch {0:.0f}mm   landing {1}mm   gap {2}'.format(
+            _mm(pitch), settings.get('landing_mm'), gap_text))
         add('line   u={0:.0f}mm  top={1:.0f}mm   pipes are {2} of the column'
             .format(_mm(column_u), _mm(line_top),
                     'RIGHT' if outward > 0 else 'LEFT'))

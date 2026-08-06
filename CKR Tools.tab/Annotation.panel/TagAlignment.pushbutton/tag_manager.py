@@ -18,7 +18,7 @@ from Autodesk.Revit.DB import (
 )
 from Autodesk.Revit.DB.Plumbing import Pipe
 
-import config
+import tool_config as config
 import runs
 import utils
 

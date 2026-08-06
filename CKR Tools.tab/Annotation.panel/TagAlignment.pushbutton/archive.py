@@ -10,7 +10,7 @@ and add it to ALIGNMENT_STRATEGIES in alignment.py. The shared helpers still
 live in alignment.py and are imported below.
 """
 
-import config
+import tool_config as config
 import utils
 
 from alignment import (

@@ -33,9 +33,10 @@ from Autodesk.Revit.DB import Transaction, TransactionGroup
 from Autodesk.Revit.DB.Plumbing import Pipe
 
 import alignment
-import config
+import tool_config as config
 import engine_bridge
 import leader_manager
+import snapshot
 import runs
 import selection
 import tag_manager
@@ -203,6 +204,15 @@ def main():
     """Run the workflow end to end."""
     view = doc.ActiveView
 
+    # Shift+click normally runs the bundle's config.py (the spacing control);
+    # this hook covers pyRevit setups where the flag reaches script.py instead.
+    try:
+        if __shiftclick__:      # noqa: F821 - injected by pyRevit
+            import spacing_control
+            spacing_control.ask_text_gap()
+    except NameError:
+        pass
+
     # --- validate the view ------------------------------------------------
     view_ok, message = validation.validate_view(view)
     if not view_ok:
@@ -314,6 +324,16 @@ def main():
                 return
             manager.set_tag_type(category_value, symbol_id)
 
+    # --- vision: capture the pre-placement ink map (Auto method only) -----
+    # Exported with our own tag categories hidden (rolled-back transaction),
+    # so a re-run never avoids its own previous tags. Failure means the
+    # layout simply runs without the ink term, as before.
+    if auto and config.AUTO_SNAPSHOT_ENABLED:
+        context['ink_map'] = snapshot.capture_ink_map(
+            uidoc, doc, view, list(config.SUPPORTED_CATEGORIES.values()))
+        logger.debug('Ink map: {}'.format(
+            'captured' if context.get('ink_map') else 'unavailable'))
+
     leaders = leader_manager.LeaderManager(doc, view)
     failures = []
 
@@ -420,6 +440,11 @@ def main():
         return
 
     uidoc.RefreshActiveView()
+
+    # The drawn result, exported next to the log - the reviewer's eyes.
+    if auto and config.AUTO_SNAPSHOT_ENABLED:
+        snapshot.save_after(doc)
+
     report(method, created, reused, moved, leaders_updated,
            len(ignored), failures)
 

@@ -9,7 +9,7 @@ own.
 
 from Autodesk.Revit.DB import ViewType
 
-import config
+import tool_config as config
 import utils
 
 
