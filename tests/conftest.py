@@ -1,17 +1,25 @@
 # -*- coding: utf-8 -*-
-"""Make the Align Tags bundle importable from the repo-root test suite.
+"""Make the tool bundles importable from the repo-root test suite.
 
 pyRevit bundles are plain folders (with spaces in their names), not packages,
 so the bundle directory itself goes on sys.path - exactly what script.py does
 inside Revit.
+
+Tag Linked Services keeps its modules in a package under the bundle's lib
+folder, so that folder goes on the path instead and the tests import
+``ckr_taglinked.<module>``. Only the modules with no Revit API import are
+reachable outside Revit, which is the point of the layering.
 """
 
 import os
 import sys
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BUNDLE = os.path.join(
-    _REPO_ROOT, 'CKR Tools.tab', 'Annotation.panel', 'AlignTags.pushbutton')
+_ANNOTATION = os.path.join(_REPO_ROOT, 'CKR Tools.tab', 'Annotation.panel')
+_BUNDLE = os.path.join(_ANNOTATION, 'AlignTags.pushbutton')
+_TAGLINKED_LIB = os.path.join(_ANNOTATION, 'TagLinkedServices.pushbutton',
+                              'lib')
 
-if _BUNDLE not in sys.path:
-    sys.path.insert(0, _BUNDLE)
+for _path in (_BUNDLE, _TAGLINKED_LIB):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)

@@ -1,0 +1,282 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Tag Linked Services"
+        Width="780" Height="700" MinWidth="700" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False">
+    <DockPanel Margin="12">
+
+        <!-- Profiles and actions -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Profile" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox x:Name="ProfileCombo" Grid.Column="1" VerticalAlignment="Center"
+                      ToolTip="Saved settings profiles. The last state you used is reloaded automatically."/>
+            <Button x:Name="ProfileSaveButton" Grid.Column="2" Content="Save as..." Width="76" Margin="6,0,0,0" Padding="4"/>
+            <Button x:Name="ProfileDeleteButton" Grid.Column="3" Content="Delete" Width="60" Margin="6,0,0,0" Padding="4"/>
+            <Button x:Name="HelpButton" Grid.Column="4" Content="Help" Width="56" Margin="6,0,0,0" Padding="4"/>
+            <Button x:Name="PreviewButton" Grid.Column="6" Content="Preview" Width="90" Padding="4" Margin="0,0,8,0"
+                    ToolTip="Run the whole filter and classification chain and report the counts. No tag is left in the model."/>
+            <Button x:Name="PlaceButton" Grid.Column="7" Content="Place Tags" Width="110" Padding="4" Margin="0,0,8,0"
+                    IsDefault="True" FontWeight="Bold"/>
+            <Button x:Name="CancelButton" Grid.Column="8" Content="Cancel" Width="70" Padding="4" IsCancel="True"/>
+        </Grid>
+
+        <TabControl x:Name="Tabs">
+
+            <!-- ============================ Links and tags -->
+            <TabItem Header="Links and tags">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Grid.Row="0" Header="Linked models" Padding="6">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6"
+                                       Foreground="#5A6068"
+                                       Text="Each placed instance is listed separately - a link placed twice has its own position, so it is tagged on its own terms. Unloaded links are shown disabled."/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="LinksPanel"/>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="1" Header="Categories and tag types" Padding="6" Margin="0,8,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="66"/>
+                                <ColumnDefinition Width="100"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Include" FontWeight="Bold"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Run tag family : type" FontWeight="Bold" Margin="4,0,0,0"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Riser tag (optional)" FontWeight="Bold" Margin="4,0,0,0"
+                                       ToolTip="Vertical runs use this tag type. Left blank, they use the run tag."/>
+                            <TextBlock Grid.Row="0" Grid.Column="3" Text="Leader" FontWeight="Bold" Margin="4,0,0,0"/>
+                            <TextBlock Grid.Row="0" Grid.Column="4" Text="Orientation" FontWeight="Bold" Margin="4,0,0,0"/>
+
+                            <CheckBox x:Name="PipesInclude" Grid.Row="1" Grid.Column="0" Content="Pipes" Margin="0,6,0,0" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="PipesTagH" Grid.Row="1" Grid.Column="1" Margin="4,6,4,0"/>
+                            <ComboBox x:Name="PipesTagV" Grid.Row="1" Grid.Column="2" Margin="4,6,4,0"/>
+                            <CheckBox x:Name="PipesLeader" Grid.Row="1" Grid.Column="3" Margin="8,10,0,0"/>
+                            <ComboBox x:Name="PipesOrient" Grid.Row="1" Grid.Column="4" Margin="4,6,0,0"/>
+
+                            <CheckBox x:Name="DuctsInclude" Grid.Row="2" Grid.Column="0" Content="Ducts" Margin="0,6,0,0" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="DuctsTagH" Grid.Row="2" Grid.Column="1" Margin="4,6,4,0"/>
+                            <ComboBox x:Name="DuctsTagV" Grid.Row="2" Grid.Column="2" Margin="4,6,4,0"/>
+                            <CheckBox x:Name="DuctsLeader" Grid.Row="2" Grid.Column="3" Margin="8,10,0,0"/>
+                            <ComboBox x:Name="DuctsOrient" Grid.Row="2" Grid.Column="4" Margin="4,6,0,0"/>
+
+                            <CheckBox x:Name="TraysInclude" Grid.Row="3" Grid.Column="0" Content="Cable Trays" Margin="0,6,0,0" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="TraysTagH" Grid.Row="3" Grid.Column="1" Margin="4,6,4,0"/>
+                            <ComboBox x:Name="TraysTagV" Grid.Row="3" Grid.Column="2" Margin="4,6,4,0"/>
+                            <CheckBox x:Name="TraysLeader" Grid.Row="3" Grid.Column="3" Margin="8,10,0,0"/>
+                            <ComboBox x:Name="TraysOrient" Grid.Row="3" Grid.Column="4" Margin="4,6,0,0"/>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- ============================ Filters -->
+            <TabItem Header="Filters">
+                <Grid Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0" Header="Family and type" Padding="6" Margin="0,0,6,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Foreground="#5A6068" TextWrapping="Wrap" Margin="0,0,0,6"
+                                       Text="Tick nothing to accept every family and type."/>
+                            <TreeView x:Name="TypeTree"/>
+                        </DockPanel>
+                    </GroupBox>
+
+                    <Grid Grid.Column="1" Margin="6,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <GroupBox Grid.Row="0" Header="System classification" Padding="4">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="ClassificationPanel"/>
+                            </ScrollViewer>
+                        </GroupBox>
+                        <GroupBox Grid.Row="1" Header="System type" Padding="4" Margin="0,6,0,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="SystemTypePanel"/>
+                            </ScrollViewer>
+                        </GroupBox>
+                        <GroupBox Grid.Row="2" Header="Reference level (link)" Padding="4" Margin="0,6,0,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="LevelPanel"/>
+                            </ScrollViewer>
+                        </GroupBox>
+                        <GroupBox Grid.Row="3" Header="Workset (link)" Padding="4" Margin="0,6,0,0">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="WorksetPanel"/>
+                            </ScrollViewer>
+                        </GroupBox>
+
+                        <GroupBox Grid.Row="4" Header="Size range" Padding="6" Margin="0,6,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="From" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SizeFromBox" Grid.Column="1" Margin="6,0" HorizontalContentAlignment="Right"
+                                         ToolTip="Blank means no lower limit. Pipes filter on diameter, ducts on the largest of diameter / width / height, trays on width."/>
+                                <TextBlock Grid.Column="2" Text="to" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBox x:Name="SizeToBox" Grid.Column="3" Margin="6,0" HorizontalContentAlignment="Right"
+                                         ToolTip="Blank means no upper limit."/>
+                                <TextBlock Grid.Column="4" Text="mm" VerticalAlignment="Center"/>
+                            </Grid>
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <!-- ============================ Rules -->
+            <TabItem Header="Rules">
+                <StackPanel Margin="12">
+
+                    <GroupBox Header="Classification" Padding="8">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="#5A6068" Margin="0,0,0,8"
+                                       Text="Gravity drainage falls at 1:100 to 1:40, so a run is horizontal by ANGLE, not by a flat test. The 15 degree default is a gradient of about 1:3.7 - well clear of any drainage gradient in use."/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="260"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Horizontal tolerance (at or below)" VerticalAlignment="Center"/>
+                                <TextBox x:Name="HorizontalTolBox" Grid.Row="0" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="degrees" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Vertical tolerance (at or above)" VerticalAlignment="Center"/>
+                                <TextBox x:Name="VerticalTolBox" Grid.Row="1" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="degrees" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                            </Grid>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="Minimum visible length" Padding="8" Margin="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="#5A6068" Margin="0,0,0,8"
+                                       Text="Measured on the part of the run inside this view's range and crop - never on the element. A 30 m riser element therefore behaves the same on every plan it passes through."/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="260"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Horizontal runs" VerticalAlignment="Center"/>
+                                <TextBox x:Name="MinHorizontalBox" Grid.Row="0" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="mm" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Vertical runs (risers and drops)" VerticalAlignment="Center"/>
+                                <TextBox x:Name="MinVerticalBox" Grid.Row="1" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="mm" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Inclined runs" VerticalAlignment="Center"/>
+                                <TextBox x:Name="MinInclinedBox" Grid.Row="2" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="mm" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <CheckBox x:Name="IncludeInclinedCheck" Grid.Row="3" Grid.ColumnSpan="3" Margin="0,8,0,0"
+                                          Content="Tag inclined runs as well"
+                                          ToolTip="Off by default: a run steeper than the horizontal tolerance but shallower than the vertical one is usually a swept bend leg, not a run worth annotating."/>
+                            </Grid>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="View and duplicates" Padding="8" Margin="0,10,0,0">
+                        <StackPanel>
+                            <CheckBox x:Name="SkipTaggedCheck" Content="Skip elements already tagged in this view"
+                                      ToolTip="Re-running then creates no duplicates; the skipped count equals what was placed before."/>
+                            <CheckBox x:Name="ExtendDepthCheck" Content="Extend to view depth" Margin="0,6,0,0"
+                                      ToolTip="Measure the visible length down to the view depth plane instead of the bottom clip plane. Off by default, because MEP curves below the bottom clip plane are not normally drawn."/>
+                            <CheckBox x:Name="VerifyVisibleCheck" Content="Confirm every tag is really visible (recommended)" Margin="0,6,0,0"
+                                      ToolTip="Creates each tag inside a sub-transaction and keeps it only if Revit reports a bounding box for it in this view. This is the only reliable visibility confirmation the API offers. Turning it off is faster but can leave tags that do not display and does not check tag spacing."/>
+                        </StackPanel>
+                    </GroupBox>
+                </StackPanel>
+            </TabItem>
+
+            <!-- ============================ Placement -->
+            <TabItem Header="Placement">
+                <StackPanel Margin="12">
+                    <GroupBox Header="Paper-space offsets" Padding="8">
+                        <StackPanel>
+                            <TextBlock TextWrapping="Wrap" Foreground="#5A6068" Margin="0,0,0,8"
+                                       Text="Tag geometry belongs to the sheet, not the model. These are millimetres ON PAPER and are multiplied by the view scale, so the same numbers measure identically at 1:50 and at 1:200."/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="300"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Horizontal run - offset from the run" VerticalAlignment="Center"/>
+                                <TextBox x:Name="OffsetHorizontalBox" Grid.Row="0" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="mm on paper" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Riser - diagonal offset from the circle" VerticalAlignment="Center"/>
+                                <TextBox x:Name="OffsetVerticalBox" Grid.Row="1" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="mm on paper" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Minimum clear spacing between tags" VerticalAlignment="Center"/>
+                                <TextBox x:Name="SpacingBox" Grid.Row="2" Grid.Column="1" HorizontalContentAlignment="Right" Margin="0,2"/>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="mm on paper" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                            </Grid>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <TextBlock TextWrapping="Wrap" Margin="4,12,4,0" Foreground="#5A6068"
+                               Text="A tag whose head falls outside the annotation crop is not drawn on the sheet, however visible its element is - so every insertion point is clamped inside the crop, and a run whose true midpoint lies outside it is tagged at the midpoint of the part you can see. Where a tag cannot keep its clear spacing, it is retried a quarter and three quarters along the run, then on the other side, and finally placed with a leader and reported."/>
+
+                    <TextBlock TextWrapping="Wrap" Margin="4,12,4,0" Foreground="#5A6068"
+                               Text="Risers always get a leader: in plan a riser is a small circle, and a tag beside it with no leader does not say which circle it belongs to."/>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

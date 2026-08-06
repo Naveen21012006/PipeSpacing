@@ -1,0 +1,3 @@
+title: Tag Linked Services
+tooltip: "Tag pipes, ducts and cable trays that live in a LINKED model, in the active floor plan - the workflow of Tag All Not Tagged, which cannot see into links, plus conditions. Tags only runs that earn one: horizontal runs longer than a stated length, risers and drops taller than another, both measured on the part of the run visible in THIS view rather than on the element. Graded drainage still counts as horizontal. Filter by link, category, family/type, system, size, level and workset; preview the counts before anything is created. Insertion points are kept inside the annotation crop, and offsets are millimetres on the sheet, so a plan reads the same at 1:50 and 1:200."
+author: Naveen
