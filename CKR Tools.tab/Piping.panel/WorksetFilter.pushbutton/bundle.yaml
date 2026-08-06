@@ -1,0 +1,3 @@
+title: Workset Filter
+tooltip: "Tick the worksets to hide and only the rest stay on screen. The ticked worksets are hidden in the active view with Temporary Hide/Isolate - workset settings, view settings and the model are never modified. Click again to restore the view."
+author: Naveen
