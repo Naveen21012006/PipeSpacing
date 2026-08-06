@@ -1,0 +1,3 @@
+title: 2D Elements Filter
+tooltip: "Show only the 2D annotation and detail elements of the active view. Every visible 3D model element is hidden with Temporary Hide/Isolate - view settings and the model are never modified. Click again to restore the view."
+author: Naveen
