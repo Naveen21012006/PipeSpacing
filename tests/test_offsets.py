@@ -393,3 +393,75 @@ def test_a_level_leader_counts_as_rising():
     fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
               leader_rises=True)
     assert fix == (0.0, pytest.approx(0.5))
+
+
+# ---------------------------------------------------------------------------
+# F2: the text-width hint caps poisoned boxes · F1: the nudge, end to end
+# ---------------------------------------------------------------------------
+def _poisoned_tag(true_w=9.2):
+    """A re-run tag: box swallowed metres of old leader, hint knows better."""
+    t = _Tag((-40.0, 6.0, 0.0, 2.0), (-17.0, 1.0))   # 46 "wide", head lost
+    t.text_width_hint = true_w
+    return t
+
+
+def test_a_poisoned_box_defers_to_the_texts_own_width():
+    # 2026-08-09: boxes measured 10-14m of "text". With the hint the
+    # width and the head offset come from the text itself (centre-head
+    # family), so the datum survives the poisoning.
+    (head_du, _), _, exit_edge = ordered_offsets(_poisoned_tag(),
+                                                 engine.UPPER_LEFT)
+    assert head_du == pytest.approx(9.2 / 2.0)
+    assert exit_edge == pytest.approx(9.2)
+
+
+def test_an_honest_box_is_left_alone_by_the_hint():
+    t = _Tag((100.0, 110.0, 0.0, 2.0), (105.0, 1.0))
+    t.text_width_hint = 9.5          # within 1.3x of the box's 10.0
+    (head_du, _), _, exit_edge = ordered_offsets(t, engine.UPPER_LEFT)
+    assert head_du == pytest.approx(5.0)
+    assert exit_edge == pytest.approx(10.0)
+
+
+def test_no_hint_keeps_current_behaviour():
+    t = _Tag((100.0, 110.0, 0.0, 2.0), (105.0, 1.0))
+    (head_du, _), _, exit_edge = ordered_offsets(t, engine.UPPER_LEFT)
+    assert head_du == pytest.approx(5.0)
+    assert exit_edge == pytest.approx(10.0)
+
+
+def test_a_close_pick_is_nudged_clear_and_placed():
+    # F1 end to end: pick so close to the risers that the text would sit
+    # on them. The old behaviour refused; now the stack retreats by the
+    # shortfall plus clearance and every leader is valid.
+    tags = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(3)]
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(3)]
+    cfg = _plan_cfg()
+    anchor = (98.0, 0.0)             # text 9.2 wide -> ends past the pipe
+    plan = ordered_plan(anchor, base_items, tags, engine.LOWER_LEFT, 'v',
+                        cfg, 3.0, 4.0, 3.0)
+    assert any(not e['angle_ok'] for e in plan)
+
+    plan2, anchor2, moved = _PARTS['nudge_clear'](
+        anchor, base_items, tags, engine.LOWER_LEFT, 'v', cfg,
+        3.0, 4.0, 3.0, plan)
+    assert moved > 0.0
+    assert anchor2[0] < anchor[0]                    # retreated left
+    assert all(e['angle_ok'] for e in plan2)         # everything placeable
+
+
+def test_a_fitting_pick_is_never_nudged():
+    tags = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(3)]
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(3)]
+    cfg = _plan_cfg()
+    anchor = (40.0, 0.0)
+    plan = ordered_plan(anchor, base_items, tags, engine.LOWER_LEFT, 'v',
+                        cfg, 3.0, 4.0, 3.0)
+    plan2, anchor2, moved = _PARTS['nudge_clear'](
+        anchor, base_items, tags, engine.LOWER_LEFT, 'v', cfg,
+        3.0, 4.0, 3.0, plan)
+    assert moved == 0.0
+    assert anchor2 == anchor
+    assert plan2 is plan

@@ -325,6 +325,40 @@ def apply_plan(targets, plan, basis, justification, config,
     return moved, elbow_failures, angle_flagged
 
 
+_CHAR_WIDTH_FACTOR = 0.6   # mean glyph width as a fraction of text height
+
+
+def _text_width_hint(wrapper, view):
+    """Estimate of a tag's drawn text width, in feet, or None.
+
+    From the tag's OWN text and its type's text size, so a leader that
+    survives suppression cannot contaminate it - unlike the bounding
+    box, which does on every re-run. ~10% accurate; used only as a
+    sanity ceiling on box-derived widths.
+    """
+    try:
+        element = wrapper.element
+        if wrapper.kind == 'textnote':
+            return float(element.Width)      # exact, already model units
+        text = getattr(element, 'TagText', None)
+        if not text:
+            return None
+        longest = max(len(line) for line in (text.splitlines() or [text]))
+        symbol = getattr(element, 'Symbol', None)
+        if symbol is None:
+            return None
+        from Autodesk.Revit.DB import BuiltInParameter
+        param = symbol.get_Parameter(BuiltInParameter.TEXT_SIZE)
+        if param is None:
+            return None
+        size_ft = float(param.AsDouble())    # paper units
+        scale = float(getattr(view, 'Scale', 1) or 1)
+        return longest * size_ft * _CHAR_WIDTH_FACTOR * scale
+    except Exception as ex:
+        common.logger.debug('Text width hint failed: {}'.format(ex))
+        return None
+
+
 def measure_layout(targets, basis):
     """Measure text sizes with leaders suppressed; return tallest height.
 
@@ -412,6 +446,11 @@ def measure_layout(targets, basis):
                         v_hi = head2d[1] + sym_h / 2.0
                 wrapper.bbox2d = (u_lo, u_hi, v_lo, v_hi)
                 wrapper.head_ref2d = head2d
+                # Leader-proof width from the tag's own text: the sanity
+                # check ordered_offsets uses when the box is inflated by
+                # a surviving leader (re-runs measured 10-14m "text").
+                wrapper.text_width_hint = _text_width_hint(
+                    wrapper, doc.ActiveView)
                 height = wrapper.height_hint()
                 if height is None:
                     height = v_hi - v_lo
@@ -515,8 +554,20 @@ def ordered_offsets(wrapper, eff_mode):
     # derived and the box can hold a stale leader, so ordered_plan snaps
     # per-tag outliers to the cluster median - that is what stops one
     # contaminated tag indenting its row on re-runs.
-    exit_edge = (u_hi - u_lo) if engine.exit_sign(eff_mode) > 0 else 0.0
-    return ((head[0] - u_lo, head[1] - v_lo),
+    width = u_hi - u_lo
+    head_du = head[0] - u_lo
+    # Re-runs measured 10-14 METRE boxes: the previous alignment's own
+    # leaders survive suppression and swallow the box, the cluster median
+    # is as poisoned as its members, and the inflated width became a 2m+
+    # refusal halo around every pipe (2026-08-09). The tag's own text
+    # gives a leader-proof width; when the box exceeds it the box has
+    # eaten a leader, and the head sits at the text centre (family fact).
+    hint = getattr(wrapper, 'text_width_hint', None)
+    if hint and width > 1.3 * hint:
+        width = hint
+        head_du = hint / 2.0
+    exit_edge = width if engine.exit_sign(eff_mode) > 0 else 0.0
+    return ((head_du, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
             exit_edge)
 
@@ -683,6 +734,39 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
         vertical, landing, horizontal, bundle,
         intermittent=config['intermittent'],
         clearance=common.mm_to_feet(FITTING_CLEARANCE_MM))
+
+
+def _broken_count(plan):
+    return sum(1 for entry in plan if not entry['angle_ok'])
+
+
+def nudge_clear(anchor2d, base_items, targets, mode, bundle, config,
+                vertical, landing, horizontal, plan):
+    """Slide the stack away from the pipes until the text clears them.
+
+    A pick whose text cannot fit as clicked used to be REFUSED, and on
+    re-runs the refusal halo was inflated by poisoned measurements to
+    metres - no reasonable click existed (2026-08-09, 10/10 skipped,
+    "width" 4105-10778mm). The click is a HINT: the stack retreats by
+    the worst per-tag shortfall plus clearance, replans, and keeps the
+    move only if it genuinely helps.
+
+    Returns:
+        (plan, anchor2d, moved_ft) - moved_ft is 0.0 when nothing moved.
+    """
+    needs = [float(entry.get('shortfall', 0.0)) for entry in plan]
+    need = max(needs) if needs else 0.0
+    if need <= 0.0:
+        return plan, anchor2d, 0.0
+
+    moved = need + common.mm_to_feet(FITTING_CLEARANCE_MM)
+    # Leaders exit towards +sign, so the pipes are that way: retreat.
+    shifted = (anchor2d[0] - engine.exit_sign(mode) * moved, anchor2d[1])
+    retry = ordered_plan(shifted, base_items, targets, mode, bundle,
+                         config, vertical, landing, horizontal)
+    if not retry or _broken_count(retry) >= _broken_count(plan):
+        return plan, anchor2d, 0.0   # moving did not help: leave the pick
+    return retry, shifted, moved
 
 
 _MODE_NAMES = {
@@ -1196,6 +1280,19 @@ def align_set(targets, config, basis, gap, justification, prompt):
             plan = ordered_plan(anchor2d, base_items, targets, effective,
                                 bundle, config, vertical, landing,
                                 horizontal)
+
+            # The click is a hint: if the text would sit on a pipe, back
+            # the stack off instead of refusing the pick.
+            plan, anchor2d, moved = nudge_clear(
+                anchor2d, base_items, targets, effective, bundle, config,
+                vertical, landing, horizontal, plan)
+            if moved > 0.0:
+                output.print_md(
+                    ':left_right_arrow: Stack moved **{0:.0f} mm** back '
+                    'from the pipes - the text would not fit where you '
+                    'clicked.'.format(common.feet_to_mm(moved)))
+                file_log.info('Anchor nudged %.0fmm clear of the pipes.',
+                              common.feet_to_mm(moved))
             log_pick(anchor2d, effective, plan, targets)
         else:
             effective = engine.resolve_mode(config['mode'],
@@ -1228,26 +1325,16 @@ def align_set(targets, config, basis, gap, justification, prompt):
                             _MODE_NAMES[detected],
                             _MODE_NAMES[effective]))
 
-        # Never commit a mostly-broken ordered plan: the side is already
-        # the one this click implies, so if most tags still cannot reach
-        # their pipe their text would cross it - skip and keep what's
-        # there.
+        # A pick is never refused for geometry (user decision, F1,
+        # 2026-08-09): nudge_clear has already bought whatever room it
+        # could, and a tag placed imperfectly still beats a refused pick
+        # whose "halo" was inflated by poisoned measurements to metres.
+        # Anything still flagged is placed and logged.
         if ordered is not None and plan:
-            broken = sum(1 for entry in plan if not entry['angle_ok'])
-            if broken * 2 > len(plan):
-                boxes = [getattr(w, 'bbox2d', None) for w in targets]
-                widths = [b[1] - b[0] for b in boxes if b]
-                width_mm = common.feet_to_mm(max(widths)) if widths else 0.0
-                output.print_md(
-                    ':warning: Pick skipped - {0} of {1} tag(s) cannot '
-                    'reach their pipe from there (measured text width '
-                    '~{2:.0f} mm would sit on or past the pipe). Click '
-                    'further from the pipes; the previous alignment is '
-                    'untouched.'.format(broken, len(plan), width_mm))
-                file_log.info(
-                    'Pick skipped: %s/%s broken; max text width %.0fmm.',
-                    broken, len(plan), width_mm)
-                continue
+            broken = _broken_count(plan)
+            if broken:
+                file_log.info('Placed with %s/%s leader(s) still flagged.',
+                              broken, len(plan))
 
         group = TransactionGroup(doc, TITLE)
         group.Start()

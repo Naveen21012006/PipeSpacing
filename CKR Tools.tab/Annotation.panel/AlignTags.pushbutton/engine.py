@@ -544,6 +544,11 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
         lo, hi = float(item['span'][0]), float(item['span'][1])
         angle_ok = True
         entry_straight = False
+        # How far the WHOLE stack must slide away from the pipes (along
+        # -sign) for this tag to become placeable. 0 means it is either
+        # fine already or broken for a reason sliding cannot mend (pipe
+        # on the wrong side, or too short for the slant).
+        shortfall = 0.0
 
         own = owns[item_index]
 
@@ -562,6 +567,7 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                 band_lo = band_hi = (lo + hi) / 2.0
             if avail < 0.0:
                 end, angle_ok = (elbow_u, line_v), False  # text past pipe
+                shortfall = -avail        # slide back by exactly this
             elif zero and band_lo <= line_v <= band_hi:
                 # Level with the pipe: one horizontal line, elbow grip
                 # parked at the MIDPOINT (usable grab handle, never blocks
@@ -629,8 +635,11 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             # overlay the pipe itself.
             elbow_u = turn_u
             end = (turn_u, pos)
-            angle_ok = sign * (turn_u - edge_u) >= 0.0
+            room = sign * (turn_u - edge_u)
+            angle_ok = room >= 0.0
             entry_straight = angle_ok
+            if not angle_ok:
+                shortfall = -room     # the turn sits behind the text
         else:
             elbow_u = edge_u + sign * landing   # no horizontal pipe limit
             drop = ssign * (pos - line_v)
@@ -652,6 +661,7 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             'end': end,
             'straight': entry_straight,
             'angle_ok': angle_ok,
+            'shortfall': shortfall,
         }
 
     return results
