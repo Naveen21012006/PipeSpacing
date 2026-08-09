@@ -577,3 +577,31 @@ def test_zero_distance_column_is_flush_end_to_end():
                         'v', _plan_cfg(), 3.0, 4.0, 3.0)
     for entry in plan:
         assert entry['head'][0] == pytest.approx(40.0)   # heads ON column
+
+
+def test_calibrated_width_replaces_the_estimate_in_the_fit_floor():
+    # Left + right drawn distances give the true width; the 2.6x-over
+    # estimate was pinning left-side stacks metres from the pipes.
+    t = _poisoned_tag(true_w=9.2)      # hint says 9.2
+    t.learned_left_ft = 0.0            # head ON the left edge
+    t.learned_right_ft = 4.8           # drawn truth: 4.8 wide
+    (head_du, _), _, exit_edge = ordered_offsets(t, engine.LOWER_LEFT)
+    assert head_du == 0.0
+    assert exit_edge == pytest.approx(4.8)     # truth, not the estimate
+
+
+def test_width_calibration_needs_both_sides():
+    # Only one side measured: the estimate still stands - never combine
+    # a measured half with a guessed one.
+    t = _poisoned_tag(true_w=9.2)
+    t.learned_left_ft = 0.0
+    (head_du, _), _, exit_edge = ordered_offsets(t, engine.LOWER_LEFT)
+    assert exit_edge == pytest.approx(9.2)
+
+
+def test_calibrated_width_is_ignored_where_exit_edge_is_zero():
+    t = _poisoned_tag(true_w=9.2)
+    t.learned_left_ft = 0.0
+    t.learned_right_ft = 4.8
+    _, _, exit_edge = ordered_offsets(t, engine.LOWER_RIGHT)
+    assert exit_edge == 0.0

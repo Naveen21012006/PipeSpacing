@@ -578,6 +578,16 @@ def ordered_offsets(wrapper, eff_mode):
         # every row, 2026-08-09). Treating 0 as "unset" discarded the
         # calibration and left the column on ragged per-tag estimates.
         head_du = learned
+    # Calibrated WIDTH = head-to-left + head-to-right, both measured
+    # from the drawing (left by exit-right picks, right by exit-left
+    # picks). The estimate ran ~2.6x over on this family and its
+    # inflated fit-floor pinned left-side stacks ~2.5m short of where
+    # they could legally sit ("something is restricting on the left",
+    # 2026-08-09).
+    learned_r = getattr(wrapper, 'learned_right_ft', None)
+    if learned is not None and learned >= 0.0 \
+            and learned_r is not None and learned_r > 0.0:
+        width = learned + learned_r
     exit_edge = width if engine.exit_sign(eff_mode) > 0 else 0.0
     return ((head_du, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
@@ -1192,6 +1202,11 @@ def _apply_learned_left(targets):
             mm = learned.get(type_key)
         if mm is not None:              # 0.0 is a real, loadable value
             wrapper.learned_left_ft = common.mm_to_feet(mm)
+        mm_r = learned.get('R:' + tag_key)
+        if mm_r is None:
+            mm_r = learned.get('R:' + type_key)
+        if mm_r is not None:
+            wrapper.learned_right_ft = common.mm_to_feet(mm_r)
 
 
 def _row_calibration(targets, plan, anchor2d, basis):
@@ -1230,32 +1245,64 @@ def _row_calibration(targets, plan, anchor2d, basis):
     return needs_replan
 
 
+def _row_calibration_right(targets, plan, anchor2d, basis):
+    """Calibrate each row's head-to-RIGHT-edge from an exit-left stack.
+
+    On that side the RIGHT edge is the leader-free one. Left plus right
+    is the tag's true drawn width - the number the fit-floor needs. The
+    width ESTIMATE ran ~2.6x over on this family, pinning left-side
+    stacks metres short of the pipes (2026-08-09).
+    """
+    view = doc.ActiveView
+    floor = common.mm_to_feet(_CORRECT_MIN_MM)
+    cap = common.mm_to_feet(_CORRECT_MAX_MM)
+    for entry in plan:
+        wrapper = targets[entry['key']]
+        u_span = common.extent_along(wrapper.element, view, basis[0])
+        used = getattr(wrapper, 'effective_offset', None)
+        if u_span is None or used is None:
+            continue
+        head_u = anchor2d[0] + used[0]
+        distance = u_span[1] - head_u
+        if distance < -floor or distance > cap:
+            continue                    # lying box: never calibrate from it
+        wrapper.learned_right_ft = max(0.0, distance)
+
+
 def _persist_learned_left(targets):
     """Bank every calibrated distance: exact per tag, median per type."""
     values = settings.load()
     learned = dict(values.get('learned_left', {}))
     by_type = {}
+    by_type_r = {}
     changed = False
     for wrapper in targets:
-        ft = getattr(wrapper, 'learned_left_ft', None)
-        if ft is None or ft < 0.0:      # 0.0 is a real, bankable value
-            continue
-        mm = common.feet_to_mm(ft)
         tag_key, type_key = _learn_keys(wrapper)
-        if abs(learned.get(tag_key, 0.0) - mm) > 2.0:
-            learned[tag_key] = mm
-            changed = True
-        by_type.setdefault(type_key, []).append(mm)
-    for type_key, values_mm in by_type.items():
+        ft = getattr(wrapper, 'learned_left_ft', None)
+        if ft is not None and ft >= 0.0:    # 0.0 is a real, bankable value
+            mm = common.feet_to_mm(ft)
+            if abs(learned.get(tag_key, 0.0) - mm) > 2.0:
+                learned[tag_key] = mm
+                changed = True
+            by_type.setdefault(type_key, []).append(mm)
+        ft_r = getattr(wrapper, 'learned_right_ft', None)
+        if ft_r is not None and ft_r >= 0.0:
+            mm_r = common.feet_to_mm(ft_r)
+            if abs(learned.get('R:' + tag_key, 0.0) - mm_r) > 2.0:
+                learned['R:' + tag_key] = mm_r
+                changed = True
+            by_type_r.setdefault('R:' + type_key, []).append(mm_r)
+    for key, values_mm in list(by_type.items()) + list(by_type_r.items()):
         med = sorted(values_mm)[(len(values_mm) - 1) // 2]
-        if abs(learned.get(type_key, 0.0) - med) > 2.0:
-            learned[type_key] = med
+        if abs(learned.get(key, 0.0) - med) > 2.0:
+            learned[key] = med
             changed = True
     if changed:
         values['learned_left'] = learned
         settings.save(values)
         file_log.info('Banked %s calibrated edge distance(s).',
-                      sum(len(v) for v in by_type.values()))
+                      sum(len(v) for v in by_type.values())
+                      + sum(len(v) for v in by_type_r.values()))
 
 
 def _drawn_correction(targets, plan, anchor2d, mode, basis):
@@ -1496,6 +1543,13 @@ def align_set(targets, config, basis, gap, justification, prompt):
                         targets, plan, basis, justification, config,
                         move_ends=True)
                     file_log.info('Column recalibrated per row.')
+                _persist_learned_left(targets)
+            elif ordered is not None:
+                # Exit-left: the RIGHT edge is the clean one - calibrate
+                # each row's head-to-right distance. Left + right is the
+                # true drawn width, which honest-floors the fit clamp
+                # that was pinning left-side stacks metres out.
+                _row_calibration_right(targets, plan, anchor2d, basis)
                 _persist_learned_left(targets)
 
             # Self-correcting pick: measure where the drawn corner
