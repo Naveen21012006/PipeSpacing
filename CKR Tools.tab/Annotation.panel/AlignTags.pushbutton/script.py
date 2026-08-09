@@ -1341,25 +1341,30 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
 
     # Which way does the DRAWN leader leave the text? The mode cannot be
     # trusted for this - a Lower-mode pick above a horizontal run still
-    # draws descending leaders - so read it off the plan: the arrow
-    # against the landing. A level leader keeps the bottom edge free.
-    rises = bottom['end'][1] >= bottom['elbow'][1] - 1e-9
+    # draws descending leaders - so read it off the plan: the leader's
+    # lowest point against the LANDING height (riser approaches park the
+    # elbow at the circle, below the text, so the elbow alone no longer
+    # says which side the leader occupies).
+    plan_mid = bottom.get('line_v', bottom['elbow'][1])
+    rises = min(bottom['end'][1], bottom['elbow'][1]) >= plan_mid - 1e-9
 
     # A descending leader hides the bottom edge; derive it from the
     # landing height (text mid) and the clean top edge instead. Read the
-    # elbow Revit actually holds; fall back to the planned one -
-    # set_elbow was verified when it was applied.
+    # elbow Revit actually holds when it sits on the landing line; for a
+    # riser approach (elbow at the circle) the planned landing height is
+    # the only mid available.
     elbow_v = None
     if not rises:
-        elbow_v = bottom['elbow'][1]
-        try:
-            keys = wrapper.leader_keys()
-            position = getattr(wrapper, 'primary_position', 0) or 0
-            drawn = wrapper.get_elbow(keys[position])
-            if drawn is not None:
-                elbow_v = common.to_2d(drawn, basis)[1]
-        except Exception as ex:
-            common.logger.debug('Elbow read failed: {}'.format(ex))
+        elbow_v = plan_mid
+        if abs(bottom['elbow'][1] - plan_mid) <= 1e-9:
+            try:
+                keys = wrapper.leader_keys()
+                position = getattr(wrapper, 'primary_position', 0) or 0
+                drawn = wrapper.get_elbow(keys[position])
+                if drawn is not None:
+                    elbow_v = common.to_2d(drawn, basis)[1]
+            except Exception as ex:
+                common.logger.debug('Elbow read failed: {}'.format(ex))
 
     fix = correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v,
                                 leader_rises=rises, text_left=text_left)

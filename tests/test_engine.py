@@ -997,3 +997,76 @@ def test_all_short_pipes_spread_instead_of_piling():
     assert len(set(round(t, 6) for t in turns)) == 3   # all distinct
     assert turns[1] - turns[0] > 0.5
     assert turns[2] - turns[1] > 0.5
+
+
+# ---------------------------------------------------------------------------
+# Risers in plan: point targets (user rules, 2026-08-10)
+# ---------------------------------------------------------------------------
+def _riser_items(circle_vs, u=100.0):
+    """Vertical pipes seen end-on: point spans at one u, stacked in v."""
+    return [{'key': i, 'own': 'v', 'pos': u, 'span': (v, v)}
+            for i, v in enumerate(circle_vs)]
+
+
+def test_riser_rows_order_top_circle_to_top_tag():
+    # All points share one u - the left-to-right key ties. The height
+    # must break the tie: topmost circle -> top tag, so leaders can
+    # never cross at the column.
+    items = _riser_items([5.0, 25.0, 15.0])
+    plan = engine.plan_ordered((140.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    by_key = {e['key']: e for e in plan}
+    # circle at v=25 is topmost -> highest row; v=5 lowest -> row 0.
+    assert by_key[1]['row'] == 2
+    assert by_key[2]['row'] == 1
+    assert by_key[0]['row'] == 0
+
+
+def test_riser_leader_approaches_dead_level_at_the_circle():
+    # The bend sits one clearance short of the point, AT the point's own
+    # height - the segment into the circle is horizontal; the only slant
+    # is text-to-bend. No more 7.5-degree hops.
+    items = _riser_items([5.0, 25.0, 15.0])
+    plan = engine.plan_ordered((140.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    for entry in plan:
+        assert entry['end'][0] == pytest.approx(100.0)      # on the point
+        assert entry['elbow'][1] == pytest.approx(entry['end'][1])  # level
+        assert entry['elbow'][0] == pytest.approx(102.0)    # clearance off
+        assert entry['straight']
+        assert entry['angle_ok']
+
+
+def test_riser_leaders_cannot_cross():
+    # Ordered top-to-top with level approaches: no elbow-to-end segment
+    # may intersect another. Brute-force check all pairs.
+    items = _riser_items([5.0, 25.0, 15.0, 35.0])
+    plan = engine.plan_ordered((140.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    per_tag = [engine.leader_segments(entry) for entry in plan]
+
+    def crosses(p1, p2, p3, p4):
+        def orient(a, b, c):
+            return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+        d1, d2 = orient(p3, p4, p1), orient(p3, p4, p2)
+        d3, d4 = orient(p1, p2, p3), orient(p1, p2, p4)
+        return ((d1 > 1e-9) != (d2 > 1e-9)) and ((d3 > 1e-9) != (d4 > 1e-9))
+
+    # A tag's own two segments share the elbow by construction; only
+    # DIFFERENT tags' leaders must never touch.
+    for a in range(len(per_tag)):
+        for b in range(a + 1, len(per_tag)):
+            for s1 in per_tag[a]:
+                for s2 in per_tag[b]:
+                    assert not crosses(s1[0], s1[1], s2[0], s2[1])
+
+
+def test_riser_line_v_still_reports_the_landing_height():
+    # The correction needs the LANDING height even when the elbow moved
+    # to the circle: line_v must stay the text-mid, not follow elbow_v.
+    items = _riser_items([5.0])
+    plan = engine.plan_ordered((140.0, 20.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    entry = plan[0]
+    assert entry['elbow'][1] == pytest.approx(5.0)
+    assert entry['line_v'] != pytest.approx(5.0)

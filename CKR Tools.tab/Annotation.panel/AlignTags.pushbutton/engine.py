@@ -447,8 +447,18 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
 
     rows = [0] * count
     if zero:
-        verticals = sorted((i for i in range(count) if owns[i] == 'v'),
-                           key=lambda i: float(items[i]['pos']))
+        # Risers seen in plan are POINTS sharing one u, so the
+        # left-to-right key ties on every one of them and the rows came
+        # out in arbitrary order against the circles - leaders crossed
+        # at the column (user's image, 2026-08-10). Tie-break by the
+        # point's HEIGHT, topmost first: top circle <-> top tag, and
+        # crossings become impossible, the riser analogue of
+        # "leftmost pipe = top tag".
+        verticals = sorted(
+            (i for i in range(count) if owns[i] == 'v'),
+            key=lambda i: (float(items[i]['pos']),
+                           -(float(items[i]['span'][0])
+                             + float(items[i]['span'][1])) / 2.0))
         horizontals = sorted((i for i in range(count) if owns[i] == 'h'),
                              key=lambda i: -float(items[i]['pos']))
         for position, item_index in enumerate(verticals + horizontals):
@@ -550,6 +560,9 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
         lo, hi = float(item['span'][0]), float(item['span'][1])
         angle_ok = True
         entry_straight = False
+        # The bend normally sits on the landing line; a riser approach
+        # moves it to the CIRCLE's height instead.
+        elbow_v = line_v
         # How far the WHOLE stack must slide away from the pipes (along
         # -sign) for this tag to become placeable. 0 means it is either
         # fine already or broken for a reason sliding cannot mend (pipe
@@ -574,6 +587,21 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             if avail < 0.0:
                 end, angle_ok = (elbow_u, line_v), False  # text past pipe
                 shortfall = -avail        # slide back by exactly this
+            elif zero and (hi - lo) <= 1e-9:
+                # A riser seen in plan: the target is a POINT. Approach
+                # it DEAD LEVEL at the circle's own height, the bend one
+                # clearance short of it - the only slant is the gentle
+                # run from the text down to that level (user choice,
+                # 2026-08-10, replacing the steep 7.5-degree hops that
+                # tangled at the column).
+                pv = (lo + hi) / 2.0
+                elbow_u = pos - sign * (clearance
+                                        if clearance is not None else 0.0)
+                if sign * (elbow_u - edge_u) < 0.0:
+                    elbow_u = edge_u   # never fold behind the text
+                elbow_v = pv
+                end = (pos, pv)
+                entry_straight = True
             elif zero and band_lo <= line_v <= band_hi:
                 # Level with the pipe: one horizontal line, elbow grip
                 # parked at the MIDPOINT (usable grab handle, never blocks
@@ -690,11 +718,12 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             'key': item.get('key'),
             'row': row,
             'head': head,
-            'elbow': (elbow_u, line_v),
+            'elbow': (elbow_u, elbow_v),
             'end': end,
             'straight': entry_straight,
             'angle_ok': angle_ok,
             'shortfall': shortfall,
+            'line_v': line_v,     # landing height - not always elbow_v
         }
 
     return results
