@@ -683,6 +683,19 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
 
     median_du = fallback[0][0]
     median_edge = fallback[2]
+
+    # Landing height: the box-derived half-height describes a text the
+    # family never draws, so landings sloped by the difference. Once the
+    # true drawn height is banked (level-leader stacks teach it), plan
+    # every tag's landing at bottom + H/2 - the real mid.
+    learned_half = 0.0
+    try:
+        learned_h_mm = float(config.get('learned_height_mm', 0.0))
+        if learned_h_mm > 0.0:
+            learned_half = common.mm_to_feet(learned_h_mm) / 2.0
+    except (TypeError, ValueError):
+        pass
+
     items = []
     for base, offsets in zip(base_items, measured):
         head_offset, line_offset, exit_edge = offsets or fallback
@@ -706,6 +719,9 @@ def ordered_plan(anchor2d, base_items, targets, eff_mode, bundle, config,
                 common.feet_to_mm(exit_edge),
                 common.feet_to_mm(median_edge))
             exit_edge = median_edge
+        if learned_half > 0.0 and getattr(targets[base['key']], 'kind',
+                                          None) in ('tag', 'spatial'):
+            line_offset = learned_half   # true drawn mid, not the box's
         # Remembered for log_pick's residual, so the log measures with
         # the offsets that actually placed the tag.
         targets[base['key']].effective_offset = head_offset
@@ -1113,6 +1129,26 @@ def _learn_left_distance(head_u, u_span):
                       left_mm)
 
 
+def _learn_text_height(v_span):
+    """Bank the family's true drawn text height.
+
+    Only called for a LEVEL straight leader, whose drawn box is
+    vertically pure text - the landing runs at mid-height, inside it.
+    Spent as the landing height (bottom + H/2), which is what makes
+    L-leader landings truly horizontal: the planned mid used to come
+    from the pre-measured box, the family draws its text elsewhere, and
+    every landing sloped by the difference (user, 2026-08-02).
+    """
+    height_mm = common.feet_to_mm(v_span[1] - v_span[0])
+    if height_mm <= 0.0:
+        return
+    values = settings.load()
+    if abs(values.get('learned_height_mm', 0.0) - height_mm) > 5.0:
+        values['learned_height_mm'] = height_mm
+        settings.save(values)
+        file_log.info('Learned drawn text height: %.0fmm.', height_mm)
+
+
 def _drawn_correction(targets, plan, anchor2d, mode, basis):
     """Measure the drawn bottom row against the pick; None if nothing to fix.
 
@@ -1126,6 +1162,10 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     view = doc.ActiveView
     u_span = common.extent_along(wrapper.element, view, basis[0])
     v_span = common.extent_along(wrapper.element, view, basis[1])
+
+    if v_span is not None and bottom.get('straight') \
+            and abs(bottom['end'][1] - bottom['elbow'][1]) < 1e-6:
+        _learn_text_height(v_span)
 
     # Exit-right: the left edge is measured directly - and banked, so
     # exit-left picks can use it. Exit-left: derive the edge from the

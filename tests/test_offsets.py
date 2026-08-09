@@ -420,3 +420,47 @@ def test_exit_right_ignores_the_derived_edge_and_measures():
     fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
               leader_rises=True, text_left=38.0)
     assert fix == (pytest.approx(-0.5), 0.0)
+
+
+def test_learned_height_levels_the_landing():
+    # Sloped-landing fix (2026-08-02): the box says half-height 1.0, the
+    # family actually draws 0.7 - the banked height wins, so the planned
+    # elbow (and with it the landing) sits at the TRUE drawn mid.
+    tags = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(2)]
+    for tag in tags:
+        tag.kind = 'tag'
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(2)]
+    cfg = dict(_plan_cfg())
+    cfg['learned_height_mm'] = 0.7 * 304.8 * 2     # drawn height 1.4 ft
+    plan = ordered_plan((40.0, 10.0), base_items, tags,
+                        engine.LOWER_LEFT, 'v', cfg, 3.0, 4.0, 3.0)
+    row0 = next(e for e in plan if e['row'] == 0)
+    assert row0['elbow'][1] == pytest.approx(10.0 + 0.7)
+
+
+def test_without_a_learned_height_the_box_still_decides():
+    tags = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(2)]
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(2)]
+    plan = ordered_plan((40.0, 10.0), base_items, tags,
+                        engine.LOWER_LEFT, 'v', _plan_cfg(), 3.0, 4.0, 3.0)
+    row0 = next(e for e in plan if e['row'] == 0)
+    assert row0['elbow'][1] == pytest.approx(10.0 + 1.0)   # bbox half
+
+
+def test_textnotes_keep_their_own_exact_height():
+    # height_hint is exact for text notes; the tag family's learned
+    # height must not overwrite it.
+    tags = [_Tag((0.0, 9.2, 0.0, 2.0), (4.6, 1.0)) for _ in range(2)]
+    tags[0].kind = 'textnote'
+    tags[1].kind = 'tag'
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(2)]
+    cfg = dict(_plan_cfg())
+    cfg['learned_height_mm'] = 0.7 * 304.8 * 2
+    plan = ordered_plan((40.0, 10.0), base_items, tags,
+                        engine.LOWER_LEFT, 'v', cfg, 3.0, 4.0, 3.0)
+    by_key = {e['key']: e for e in plan}
+    assert by_key[0]['elbow'][1] == pytest.approx(10.0 + 3.0 + 1.0)  # row 1
+    assert by_key[1]['elbow'][1] == pytest.approx(10.0 + 0.7)        # row 0

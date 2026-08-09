@@ -33,6 +33,11 @@ DEFAULTS = {
     # exit-right picks, where the left edge is leader-free, and spent on
     # exit-left picks, where it is not.
     'learned_left_mm': 0.0,
+    # Also learned from the drawing: the family's true drawn text height.
+    # Measured on LEVEL straight leaders (riser stacks), whose boxes are
+    # vertically pure text; spent as the landing height (bottom + H/2) so
+    # L-leader landings come out truly horizontal. 0 = not learned yet.
+    'learned_height_mm': 0.0,
     'switch_side': False,
     'attached_end': False,
     'keep_selection': True,
@@ -46,7 +51,7 @@ DEFAULTS = {
 _BOOL_KEYS = ('switch_side', 'attached_end', 'keep_selection', 'snaps_off',
               'constant_landing', 'intermittent', 'order_by_pipe')
 _FLOAT_KEYS = ('angle_deg', 'vertical_mm', 'landing_mm', 'horizontal_mm',
-               'cluster_mm', 'learned_left_mm')
+               'cluster_mm', 'learned_left_mm', 'learned_height_mm')
 _JUSTIFICATIONS = ('unchanged', 'left', 'right', 'automatic')
 
 
