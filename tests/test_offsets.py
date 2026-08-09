@@ -505,3 +505,50 @@ def test_exit_left_derived_edge_composes_with_the_landing_trick():
     fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT,
               elbow_v=11.05, leader_rises=False, text_left=39.6)
     assert fix == (pytest.approx(-0.4), pytest.approx(0.5))
+
+
+# ---------------------------------------------------------------------------
+# Per-row calibration: a tag's own drawn distance beats every estimate
+# ---------------------------------------------------------------------------
+def test_a_calibrated_tag_places_by_its_own_drawn_distance():
+    # 2026-08-09 image: hint-placed columns come out ragged because each
+    # estimate errs differently. Once a tag has been measured from its
+    # own drawing, that value wins over box AND hint.
+    t = _Tag((100.0, 110.0, 0.0, 2.0), (105.0, 1.0))
+    t.learned_left_ft = 4.2
+    (head_du, _), _, _ = ordered_offsets(t, engine.UPPER_LEFT)
+    assert head_du == pytest.approx(4.2)
+
+
+def test_calibration_beats_the_hint_on_a_poisoned_box():
+    t = _poisoned_tag()
+    t.learned_left_ft = 4.2
+    (head_du, _), _, _ = ordered_offsets(t, engine.LOWER_RIGHT)
+    assert head_du == pytest.approx(4.2)
+
+
+def test_uncalibrated_tags_keep_the_existing_ladder():
+    # No calibration: hint caps a poisoned box; honest boxes measure.
+    (head_du, _), _, _ = ordered_offsets(_poisoned_tag(),
+                                         engine.LOWER_LEFT)
+    assert head_du == pytest.approx(9.2 / 2.0)
+
+
+def test_calibrated_rows_make_a_flush_column_end_to_end():
+    # Three tags whose estimates would scatter them; their calibrated
+    # distances differ per tag (centre-head, different widths) and the
+    # planned left edges all land on the anchor column.
+    widths = (8.0, 9.2, 10.4)
+    tags = []
+    for w in widths:
+        t = _Tag((0.0, w, 0.0, 2.0), (w / 2.0, 1.0))
+        t.learned_left_ft = w / 2.0        # its own drawn truth
+        tags.append(t)
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(3)]
+    plan = ordered_plan((40.0, 0.0), base_items, tags, engine.LOWER_LEFT,
+                        'v', _plan_cfg(), 3.0, 4.0, 3.0)
+    for entry in plan:
+        w = widths[entry['key']]
+        left = entry['head'][0] - w / 2.0
+        assert left == pytest.approx(40.0)

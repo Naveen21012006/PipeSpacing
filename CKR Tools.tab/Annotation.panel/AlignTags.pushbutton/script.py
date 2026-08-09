@@ -566,6 +566,14 @@ def ordered_offsets(wrapper, eff_mode):
     if hint and width > 1.3 * hint:
         width = hint
         head_du = hint / 2.0
+    # A calibrated distance beats every estimate: it was measured from
+    # THIS tag's own drawn left edge (left-side stacks can measure it;
+    # the value persists per tag in the settings file). Per-tag hints
+    # each carry their own error, which is why a hint-placed column came
+    # out ragged - one rigid shift can never flush it (2026-08-09).
+    learned = getattr(wrapper, 'learned_left_ft', None)
+    if learned is not None and learned > 0.0:
+        head_du = learned
     exit_edge = width if engine.exit_sign(eff_mode) > 0 else 0.0
     return ((head_du, head[1] - v_lo),
             (v_hi - v_lo) / 2.0,
@@ -922,6 +930,7 @@ def run_pick_loop(targets, config):
     """
     basis = common.view_basis(doc.ActiveView)
     measure_layout(targets, basis)   # per-tag text sizes (rolled back)
+    _apply_learned_left(targets)     # per-tag calibrated edge distances
     build_items(targets, basis)      # per-tag arrow points (for clustering)
     justification = resolve_justification(config)
     gap = common.mm_to_feet(config['vertical_mm'])
@@ -1145,13 +1154,15 @@ def final_arrangement(records, config, basis):
                   len(moved), remaining)
 
 
-def _learn_key(wrapper):
-    """'project|tag type' key for the learned head-to-edge store.
+def _learn_keys(wrapper):
+    """(per-tag key, per-type key) for the learned edge-distance store.
 
-    Both parts matter: the distance scales with the view/type sizing, so
-    a value taught in one model or family type must never be spent in
-    another - the suspected cause of the 2026-08-09 breakage, when the
-    banked value was global.
+    The distance is text-dependent for a centre-head family (half this
+    tag's own width), so the exact value lives PER TAG; the per-type
+    median is the fallback for tags never yet measured. Both keys carry
+    the project title: a value taught in one model must never be spent
+    in another - the suspected cause of the 2026-08-09 breakage, when
+    the banked value was global.
     """
     try:
         type_id = common.element_id_value(wrapper.element.GetTypeId())
@@ -1161,29 +1172,79 @@ def _learn_key(wrapper):
         title = doc.Title
     except Exception:
         title = 'unknown'
-    return u'{0}|{1}'.format(title, type_id)
+    return (u'{0}|tag:{1}'.format(title, wrapper.id_value),
+            u'{0}|type:{1}'.format(title, type_id))
 
 
-def _learn_left_distance(wrapper, head_u, u_span):
-    """Bank the drawn head-to-left-edge distance for this project/type.
-
-    Left-side picks can MEASURE the left edge (it is leader-free there);
-    right-side picks cannot, but place the head exactly. The distance
-    between them is constant per project and tag type, so what the left
-    side measures, the right side spends.
-    """
-    left_mm = common.feet_to_mm(head_u - u_span[0])
-    if left_mm <= 0.0:
+def _apply_learned_left(targets):
+    """Load each tag's banked edge distance onto its wrapper, if any."""
+    learned = settings.load().get('learned_left', {})
+    if not learned:
         return
+    for wrapper in targets:
+        tag_key, type_key = _learn_keys(wrapper)
+        mm = learned.get(tag_key) or learned.get(type_key)
+        if mm:
+            wrapper.learned_left_ft = common.mm_to_feet(mm)
+
+
+def _row_calibration(targets, plan, anchor2d, basis):
+    """Calibrate EVERY row's offset from its own drawn left edge.
+
+    Exit-right stacks only - the datum edge is leader-free there for
+    every row. A hint-placed column comes out ragged because each tag's
+    estimate carries its own error, and one rigid shift cannot flush a
+    ragged column (user's image, 2026-08-09): the miss must be measured
+    and folded back PER TAG. Returns True when any row missed enough
+    that the cluster needs replanning.
+    """
+    view = doc.ActiveView
+    floor = common.mm_to_feet(_CORRECT_MIN_MM)
+    cap = common.mm_to_feet(_CORRECT_MAX_MM)
+    needs_replan = False
+    for entry in plan:
+        wrapper = targets[entry['key']]
+        u_span = common.extent_along(wrapper.element, view, basis[0])
+        used = getattr(wrapper, 'effective_offset', None)
+        if u_span is None or used is None:
+            continue
+        du = u_span[0] - anchor2d[0]
+        if abs(du) > cap:
+            continue                    # broken box: never calibrate from it
+        # Head sat at column + used[0]; its drawn edge at column + du:
+        # the tag's true head-to-edge distance is the difference.
+        wrapper.learned_left_ft = used[0] - du
+        if abs(du) > floor:
+            needs_replan = True
+    return needs_replan
+
+
+def _persist_learned_left(targets):
+    """Bank every calibrated distance: exact per tag, median per type."""
     values = settings.load()
     learned = dict(values.get('learned_left', {}))
-    key = _learn_key(wrapper)
-    if abs(learned.get(key, 0.0) - left_mm) > 5.0:
-        learned[key] = left_mm
+    by_type = {}
+    changed = False
+    for wrapper in targets:
+        ft = getattr(wrapper, 'learned_left_ft', None)
+        if not ft or ft <= 0.0:
+            continue
+        mm = common.feet_to_mm(ft)
+        tag_key, type_key = _learn_keys(wrapper)
+        if abs(learned.get(tag_key, 0.0) - mm) > 2.0:
+            learned[tag_key] = mm
+            changed = True
+        by_type.setdefault(type_key, []).append(mm)
+    for type_key, values_mm in by_type.items():
+        med = sorted(values_mm)[(len(values_mm) - 1) // 2]
+        if abs(learned.get(type_key, 0.0) - med) > 2.0:
+            learned[type_key] = med
+            changed = True
+    if changed:
         values['learned_left'] = learned
         settings.save(values)
-        file_log.info('Learned head-to-left-edge %.0fmm for %s.',
-                      left_mm, key)
+        file_log.info('Banked %s calibrated edge distance(s).',
+                      sum(len(v) for v in by_type.values()))
 
 
 def _drawn_correction(targets, plan, anchor2d, mode, basis):
@@ -1200,20 +1261,16 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     u_span = common.extent_along(wrapper.element, view, basis[0])
     v_span = common.extent_along(wrapper.element, view, basis[1])
 
-    # Exit-right: measure the left edge directly - and bank it for the
-    # other side. Exit-left: derive the edge from the exactly-placed
-    # head and this project/type's banked distance; cold-start fallback
-    # is the clean right edge minus the text's own width.
+    # Exit-right rows are calibrated per row elsewhere. Exit-left:
+    # derive the edge from the exactly-placed head and this tag's own
+    # calibrated distance; cold-start fallback is the clean right edge
+    # minus the text's own width.
     text_left = None
     if u_span is not None:
-        if engine.exit_sign(mode) > 0.0:
-            _learn_left_distance(wrapper, bottom['head'][0], u_span)
-        else:
-            learned = settings.load().get('learned_left', {})
-            learned_mm = learned.get(_learn_key(wrapper), 0.0)
-            if learned_mm > 0.0:
-                text_left = bottom['head'][0] \
-                    - common.mm_to_feet(learned_mm)
+        if engine.exit_sign(mode) < 0.0:
+            row_ft = getattr(wrapper, 'learned_left_ft', None)
+            if row_ft:
+                text_left = bottom['head'][0] - row_ft
             else:
                 width = getattr(wrapper, 'text_width_hint', None)
                 if width:
@@ -1412,6 +1469,23 @@ def align_set(targets, config, basis, gap, justification, prompt):
             _, elbow_failures, flagged_last = apply_plan(
                 targets, plan, basis, justification, config,
                 move_ends=(ordered is not None))
+
+            # Exit-right: every row's drawn left edge is measurable, so
+            # calibrate each tag from its own drawing and re-plan once.
+            # A rigid shift cannot flush a ragged column - each
+            # estimated offset carries its own error (2026-08-09 image).
+            # The calibrated distances are banked for the other side.
+            if ordered is not None \
+                    and engine.exit_sign(effective) > 0.0:
+                if _row_calibration(targets, plan, anchor2d, basis):
+                    plan = ordered_plan(anchor2d, base_items, targets,
+                                        effective, bundle, config,
+                                        vertical, landing, horizontal)
+                    _, elbow_failures, flagged_last = apply_plan(
+                        targets, plan, basis, justification, config,
+                        move_ends=True)
+                    file_log.info('Column recalibrated per row.')
+                _persist_learned_left(targets)
 
             # Self-correcting pick: measure where the drawn corner
             # ACTUALLY landed and re-plan once with the residual folded
