@@ -44,22 +44,29 @@ producing angle-0 stacks. Pass a literal `0.0` to `plan_ordered`, always.
 | `switch_side` | true | **IGNORE in ordered layouts.** The side is geometric now (§2); this checkbox only affects the legacy non-ordered path |
 | `mode` | LL | supplies Upper/Lower only; Left/Right comes from geometry (§2) |
 
-## 2 · Anchor: where a stack sits (user decision, 2026-08-02)
+## 2 · Anchor: where a stack sits (REVISED 2026-08-09 — supersedes the
+2026-08-02 pipes-derived rule)
 
-No pick exists in Auto Tag, so the anchor derives from the pipes:
+The user's pick (the reference line / picked point) now sets the column,
+**clamped to fit** — the earlier "column always derives from the pipes" rule
+is withdrawn. It was implemented faithfully (`anchor = (datum_u, anchor_v)`)
+and produced stacks whose X ignored the pick entirely, which read as a bug
+in field use (frame-measured: 0 px horizontal response across 8 picks).
 
-- **Side** — geometric, per cluster: stack goes on the side of the bundle
-  where the tags/space are; compute like `script.side_mode` does (compare
-  column u with the pipes' mean u — your `engine_bridge._mode` already does
-  this correctly). Upper/Lower from the dialog `mode`; Left/Right never from it.
-- **Horizontal** — the text block sits **one `landing_mm` clear of the
-  bundle's nearest pipe**:
-  - stack LEFT of pipes (leaders exit right): datum column =
-    `leftmost_pipe_u − landing − widest_text_width`
-  - stack RIGHT of pipes (leaders exit left): datum column =
-    `rightmost_pipe_u + landing`
-- **Vertical** — keep Auto Tag's existing row baseline logic (lowest row's
-  bottom edge = its baseline).
+- **Side** — unchanged: geometric, per cluster, from the pick's u against
+  the pipes' mean u. Upper/Lower from the dialog `mode`.
+- **Horizontal** — the pick's u IS the datum column, clamped so the text
+  always fits between the column and the pipes:
+  - stack LEFT of pipes (leaders exit right):
+    `column = min(pick_u, leftmost_pipe_u − landing − widest_text_width)`
+  - stack RIGHT of pipes (leaders exit left):
+    `column = max(pick_u, rightmost_pipe_u + landing)`
+  - when the clamp moves the column, REPORT the distance ("stack moved
+    N mm to clear the pipes") — never move silently, never refuse.
+  This mirrors Align Tags' nudge behaviour exactly; the two tools must
+  feel identical.
+- **Vertical** — unchanged: bottom-anchored; the lowest row's bottom edge
+  sits on the pick's v (field-verified within ~6 px; keep it).
 
 **The datum is ALWAYS the text block's bottom-LEFT corner, both sides.**
 Left-hand stacks are ragged on the right (leaders start at each text's own
@@ -98,10 +105,13 @@ implements, so you can verify output rather than trust it:
 Hard-won facts about the tag family (`QIC-MEP-Tag-Pipe-Tag`), all
 log-proven; your bridge currently trips on the first one:
 
-1. **`TagHeadPosition` is NOT the text corner.** The drawn text's left edge
-   sits `learned_left_mm` (≈815 mm) LEFT of the head. Your bridge passes no
-   `head_offset`, so it aligns heads — every stack lands ~815 mm right of
-   where the datum should be, ragged on both sides.
+1. **`TagHeadPosition`'s relation to the text corner is PER PROJECT.** In
+   the 08-02 project the drawn left edge sat ≈815 mm left of the head; in
+   the current project the head sits EXACTLY ON the left edge (calibrated
+   distance 0 on every row, 2026-08-09). Never assume either — read the
+   per-tag calibrated distances Align Tags banks in the settings file
+   (`learned_left`, keys `project|tag:id` / `project|type:id`; 0 is a
+   legitimate value), or calibrate from the drawn state the same way.
 2. **Bounding boxes are unreliable in every state.** They include leaders
    (`HasLeader=False` is accepted but still draws), and the family
    re-anchors its text around the head depending on leader state — a box
