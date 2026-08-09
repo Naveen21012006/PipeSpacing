@@ -36,6 +36,13 @@ DEFAULTS = {
     'intermittent': False,
     'order_by_pipe': True,
     'justification': 'unchanged',   # unchanged | left | right | automatic
+    # Learned from the drawing, KEYED per "project|tag type": the drawn
+    # head-to-left-edge distance in mm. Left-side picks can measure it
+    # (their datum edge is leader-free); right-side picks spend it. The
+    # per-key storage is the hardening after 2026-08-09: a single global
+    # value taught in one model was spent in another with different
+    # scale/sizing, which is the suspected "ruin".
+    'learned_left': {},
 }
 
 _BOOL_KEYS = ('switch_side', 'attached_end', 'keep_selection', 'snaps_off',
@@ -73,6 +80,20 @@ def load():
         values['mode'] = raw['mode']
     if raw.get('justification') in _JUSTIFICATIONS:
         values['justification'] = raw['justification']
+
+    # learned_left: {"project|type": mm}. Keep only sane entries so a
+    # hand-edited file cannot poison the datum derivation.
+    raw_learned = raw.get('learned_left')
+    if isinstance(raw_learned, dict):
+        cleaned = {}
+        for key, value in raw_learned.items():
+            try:
+                mm = float(value)
+            except (TypeError, ValueError):
+                continue
+            if 0.0 < mm < 100000.0:
+                cleaned[str(key)] = mm      # json keys are always strings
+        values['learned_left'] = cleaned
 
     # 0 is a legal saved value: it means straight leaders.
     values['angle_deg'] = engine.normalize_angle(values['angle_deg'])

@@ -465,3 +465,43 @@ def test_a_fitting_pick_is_never_nudged():
     assert moved == 0.0
     assert anchor2 == anchor
     assert plan2 is plan
+
+
+# ---------------------------------------------------------------------------
+# R1: exit-left corners correct once handed a derived datum edge
+# ---------------------------------------------------------------------------
+def test_exit_left_corrects_u_when_handed_the_datum_edge():
+    # The right-side gap, closed: the box's left edge is leader, but the
+    # caller derives the true edge (learned per-project head-to-edge, or
+    # the text-width fallback) and u corrects like any other axis.
+    u_span = (5.0, 43.0)         # left = arrow on the pipes, right clean
+    v_span = (10.0, 11.1)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_RIGHT,
+              leader_rises=True, text_left=39.5)
+    assert fix == (pytest.approx(-0.5), 0.0)
+
+
+def test_exit_left_without_a_derived_edge_still_skips_u():
+    u_span = (5.0, 43.0)
+    v_span = (10.0, 11.1)
+    assert CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_RIGHT,
+               leader_rises=True) is None
+
+
+def test_exit_right_ignores_the_derived_edge_and_measures():
+    # When the box CAN be measured, measurement wins over derivation.
+    u_span = (39.5, 42.5)
+    v_span = (10.0, 11.1)
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.LOWER_LEFT,
+              leader_rises=True, text_left=38.0)
+    assert fix == (pytest.approx(-0.5), 0.0)
+
+
+def test_exit_left_derived_edge_composes_with_the_landing_trick():
+    # Right-side stack ABOVE the pipes: u from the derived edge, v from
+    # 2*mid - top - both unverifiable axes recovered at once.
+    u_span = (5.0, 43.0)
+    v_span = (5.0, 11.6)         # bottom = arrow, top clean
+    fix = CFS(u_span, v_span, (40.0, 10.0), engine.UPPER_RIGHT,
+              elbow_v=11.05, leader_rises=False, text_left=39.6)
+    assert fix == (pytest.approx(-0.4), pytest.approx(0.5))
