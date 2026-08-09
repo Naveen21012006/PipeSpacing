@@ -552,3 +552,28 @@ def test_calibrated_rows_make_a_flush_column_end_to_end():
         w = widths[entry['key']]
         left = entry['head'][0] - w / 2.0
         assert left == pytest.approx(40.0)
+
+
+def test_zero_is_a_legitimate_calibrated_distance():
+    # This project's family anchors the head ON the text's left edge:
+    # calibration measures 0, and 0 must be applied, banked and loaded
+    # - treating it as "unset" (0.0 is falsy) discarded the calibration
+    # and left reruns on ragged estimates (2026-08-09).
+    t = _poisoned_tag()
+    t.learned_left_ft = 0.0
+    (head_du, _), _, _ = ordered_offsets(t, engine.LOWER_LEFT)
+    assert head_du == 0.0
+
+
+def test_zero_distance_column_is_flush_end_to_end():
+    tags = []
+    for w in (8.0, 9.2, 10.4):
+        t = _Tag((0.0, w, 0.0, 2.0), (0.0, 1.0))   # head ON the left edge
+        t.learned_left_ft = 0.0
+        tags.append(t)
+    base_items = [{'key': i, 'pos': 100.0 + 3.0 * i, 'span': (-50.0, 50.0)}
+                  for i in range(3)]
+    plan = ordered_plan((40.0, 0.0), base_items, tags, engine.LOWER_LEFT,
+                        'v', _plan_cfg(), 3.0, 4.0, 3.0)
+    for entry in plan:
+        assert entry['head'][0] == pytest.approx(40.0)   # heads ON column

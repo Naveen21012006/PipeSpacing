@@ -91,7 +91,7 @@ def load():
                 mm = float(value)
             except (TypeError, ValueError):
                 continue
-            if 0.0 < mm < 100000.0:
+            if 0.0 <= mm < 100000.0:    # 0 = head ON the edge, legitimate
                 cleaned[str(key)] = mm      # json keys are always strings
         values['learned_left'] = cleaned
 

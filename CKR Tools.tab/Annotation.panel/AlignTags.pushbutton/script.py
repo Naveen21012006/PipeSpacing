@@ -572,7 +572,11 @@ def ordered_offsets(wrapper, eff_mode):
     # each carry their own error, which is why a hint-placed column came
     # out ragged - one rigid shift can never flush it (2026-08-09).
     learned = getattr(wrapper, 'learned_left_ft', None)
-    if learned is not None and learned > 0.0:
+    if learned is not None and learned >= 0.0:
+        # ZERO is a legitimate value - this project's family anchors its
+        # head ON the text's left edge (calibration measured L=0 on
+        # every row, 2026-08-09). Treating 0 as "unset" discarded the
+        # calibration and left the column on ragged per-tag estimates.
         head_du = learned
     exit_edge = width if engine.exit_sign(eff_mode) > 0 else 0.0
     return ((head_du, head[1] - v_lo),
@@ -1183,8 +1187,10 @@ def _apply_learned_left(targets):
         return
     for wrapper in targets:
         tag_key, type_key = _learn_keys(wrapper)
-        mm = learned.get(tag_key) or learned.get(type_key)
-        if mm:
+        mm = learned.get(tag_key)
+        if mm is None:
+            mm = learned.get(type_key)
+        if mm is not None:              # 0.0 is a real, loadable value
             wrapper.learned_left_ft = common.mm_to_feet(mm)
 
 
@@ -1212,8 +1218,13 @@ def _row_calibration(targets, plan, anchor2d, basis):
         if abs(du) > cap:
             continue                    # broken box: never calibrate from it
         # Head sat at column + used[0]; its drawn edge at column + du:
-        # the tag's true head-to-edge distance is the difference.
-        wrapper.learned_left_ft = used[0] - du
+        # the tag's true head-to-edge distance is the difference. ZERO
+        # is legitimate (head on the left edge); meaningfully negative
+        # means the box lied, so it never calibrates.
+        distance = used[0] - du
+        if distance < -floor:
+            continue
+        wrapper.learned_left_ft = max(0.0, distance)
         if abs(du) > floor:
             needs_replan = True
     return needs_replan
@@ -1227,7 +1238,7 @@ def _persist_learned_left(targets):
     changed = False
     for wrapper in targets:
         ft = getattr(wrapper, 'learned_left_ft', None)
-        if not ft or ft <= 0.0:
+        if ft is None or ft < 0.0:      # 0.0 is a real, bankable value
             continue
         mm = common.feet_to_mm(ft)
         tag_key, type_key = _learn_keys(wrapper)
@@ -1269,7 +1280,7 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     if u_span is not None:
         if engine.exit_sign(mode) < 0.0:
             row_ft = getattr(wrapper, 'learned_left_ft', None)
-            if row_ft:
+            if row_ft is not None and row_ft >= 0.0:
                 text_left = bottom['head'][0] - row_ft
             else:
                 width = getattr(wrapper, 'text_width_hint', None)
