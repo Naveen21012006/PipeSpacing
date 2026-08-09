@@ -492,6 +492,40 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                 sorted(h_indices, key=lambda i: -rows[i])))
         v_count = max(len(v_indices), 1)
         h_count = max(len(h_indices), 1)
+
+        # Riser points share ONE slant angle so their leaders come out
+        # parallel (user's before/after, 2026-08-10: the level approach
+        # gave every leader its own shallow slope and read messy; the
+        # wanted look is a short landing then parallel slants straight
+        # into the circles). The angle is the cluster's own: the median
+        # of the direct text-to-circle slopes, clamped to 15-75 degrees;
+        # the landings absorb the per-row differences.
+        point_slant_tan = None
+        v_points = [i for i in v_indices
+                    if float(items[i]['span'][1])
+                    - float(items[i]['span'][0]) <= 1e-9]
+        if v_points:
+            ratios = []
+            for i in v_points:
+                pv = float(items[i]['span'][0])
+                lv = anchor_v + rows[i] * step \
+                    + float(items[i].get('line_offset', 0.0))
+                edge = anchor_u + sign * abs(
+                    float(items[i].get('exit_edge', 0.0)))
+                dv = abs(pv - lv)
+                du = abs(float(items[i]['pos']) - edge)
+                if du > 1e-9 and dv > 1e-9:
+                    ratios.append(dv / du)
+            if ratios:
+                # The STEEPEST direct line sets the shared angle: any
+                # shallower and that leader folds behind its text and
+                # clamps un-parallel; every other row absorbs the
+                # difference in its landing instead.
+                ratio = max(ratios)
+                ratio = max(math.tan(math.radians(15.0)),
+                            min(math.tan(math.radians(75.0)), ratio))
+                point_slant_tan = ratio
+
         if h_indices:
             lo_all = [float(items[i]['span'][0]) for i in h_indices]
             hi_all = [float(items[i]['span'][1]) for i in h_indices]
@@ -593,18 +627,22 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                 end, angle_ok = (elbow_u, line_v), False  # text past pipe
                 shortfall = -avail        # slide back by exactly this
             elif zero and (hi - lo) <= 1e-9:
-                # A riser seen in plan: the target is a POINT. Approach
-                # it DEAD LEVEL at the circle's own height, the bend one
-                # clearance short of it - the only slant is the gentle
-                # run from the text down to that level (user choice,
-                # 2026-08-10, replacing the steep 7.5-degree hops that
-                # tangled at the column).
+                # A riser seen in plan: the target is a POINT. Short
+                # landing from the text, then the cluster's COMMON slant
+                # straight into the circle - every riser leader parallel
+                # (user's before/after, 2026-08-10, superseding both the
+                # 7.5-degree hops and the per-leader level approach).
                 pv = (lo + hi) / 2.0
-                elbow_u = pos - sign * (clearance
-                                        if clearance is not None else 0.0)
+                dv = abs(pv - line_v)
+                if point_slant_tan is not None and dv > 1e-9:
+                    elbow_u = pos - sign * (dv / point_slant_tan)
+                else:
+                    # Level with its circle: land straight into it.
+                    elbow_u = pos - sign * (clearance
+                                            if clearance is not None
+                                            else 0.0)
                 if sign * (elbow_u - edge_u) < 0.0:
                     elbow_u = edge_u   # never fold behind the text
-                elbow_v = pv
                 end = (pos, pv)
                 entry_straight = True
             elif zero and band_lo <= line_v <= band_hi:

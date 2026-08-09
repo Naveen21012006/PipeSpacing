@@ -1027,20 +1027,27 @@ def test_riser_rows_order_top_circle_to_top_tag():
     assert by_key[0]['row'] == 0
 
 
-def test_riser_leader_approaches_dead_level_at_the_circle():
-    # The bend sits one clearance short of the point, AT the point's own
-    # height - the segment into the circle is horizontal; the only slant
-    # is text-to-bend. No more 7.5-degree hops.
+def test_riser_leaders_share_one_slant_angle():
+    # The user's before/after (2026-08-10): short landing at the text,
+    # then every slant PARALLEL at the cluster's common angle, straight
+    # into its circle. The bend sits on the landing line.
     items = _riser_items([5.0, 25.0, 15.0])
     plan = engine.plan_ordered((140.0, 0.0), items, engine.UPPER_RIGHT,
                                0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    slopes = []
     for entry in plan:
         own_u = 100.0 + 0.3 * entry['key']
         assert entry['end'][0] == pytest.approx(own_u)      # on the point
-        assert entry['elbow'][1] == pytest.approx(entry['end'][1])  # level
-        assert entry['elbow'][0] == pytest.approx(own_u + 2.0)  # clearance off
+        assert entry['elbow'][1] == pytest.approx(entry['line_v'])  # on landing
         assert entry['straight']
         assert entry['angle_ok']
+        du = abs(entry['end'][0] - entry['elbow'][0])
+        dv = abs(entry['end'][1] - entry['elbow'][1])
+        if dv > 1e-9:
+            slopes.append(dv / du)
+    assert len(slopes) >= 2
+    for s in slopes[1:]:
+        assert s == pytest.approx(slopes[0])                # parallel
 
 
 def test_riser_leaders_cannot_cross():
@@ -1067,12 +1074,17 @@ def test_riser_leaders_cannot_cross():
                     assert not crosses(s1[0], s1[1], s2[0], s2[1])
 
 
-def test_riser_line_v_still_reports_the_landing_height():
-    # The correction needs the LANDING height even when the elbow moved
-    # to the circle: line_v must stay the text-mid, not follow elbow_v.
-    items = _riser_items([5.0])
-    plan = engine.plan_ordered((140.0, 20.0), items, engine.UPPER_RIGHT,
+def test_riser_slant_angle_is_clamped_to_a_readable_range():
+    # A circle nearly level with its row must not flatten the shared
+    # angle below 15 degrees, and a deep drop must not steepen it past
+    # 75 - the clamp keeps the parallel sheaf readable.
+    import math as _math
+    items = _riser_items([5.0, 5.5, 6.0])       # nearly level cluster
+    plan = engine.plan_ordered((140.0, 4.0), items, engine.UPPER_RIGHT,
                                0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
-    entry = plan[0]
-    assert entry['elbow'][1] == pytest.approx(5.0)
-    assert entry['line_v'] != pytest.approx(5.0)
+    for entry in plan:
+        du = abs(entry['end'][0] - entry['elbow'][0])
+        dv = abs(entry['end'][1] - entry['elbow'][1])
+        if dv > 1e-9 and du > 1e-9:
+            angle = _math.degrees(_math.atan2(dv, du))
+            assert 15.0 - 1e-6 <= angle <= 75.0 + 1e-6
