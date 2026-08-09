@@ -515,12 +515,18 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                 usable = full_span * 0.6
                 turn_hi, turn_lo = base, base - usable
             turn_step = min(step, usable / len(h_indices))
+            turn_starved = False
             if clearance is not None and turn_step < clearance:
                 # Short runs collapsed the fan to a sliver (user: "gap is
                 # too tight"). Readable spacing beats the near-window:
                 # spread by the clearance, using the whole forward band.
                 turn_step = min(clearance,
                                 full_span / len(h_indices))
+                # Still under the clearance: the COMMON window - the
+                # intersection of every pipe's span - is starved by its
+                # shortest member. Each tag then re-slots over its OWN
+                # pipe's room instead (below).
+                turn_starved = turn_step < clearance
 
     results = [None] * count
     for item_index in range(count):
@@ -623,10 +629,37 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             else:
                 # Sub-group's TOP tag turns first.
                 nearness = h_top_rank[item_index]
+            # Common fan first; but the common window is the INTERSECTION
+            # of every pipe's span, so one short pipe used to drag every
+            # arrow into a cramped sliver. When the window is starved, or
+            # a tag's common slot falls off ITS OWN pipe, that tag
+            # re-slots evenly over its own room instead - arrows
+            # distribute by each pipe's length (user rule, 2026-08-09).
+            # An unstarved window keeps the common spacing untouched, so
+            # long-pipe fans look exactly as before.
+            own_margin = min(margin, 0.15 * max(hi - lo, 0.0))
+            slots = max(h_count - 1.0, 1.0)
             if sign > 0:
                 turn_u = turn_lo + nearness * turn_step
+                own_far = hi - own_margin
+                own_room = own_far - base
+                if own_room > 0.0 and (turn_starved or turn_u > own_far):
+                    # Spread end-to-end over THIS pipe's room, but never
+                    # wider than the clearance spacing a long pipe would
+                    # get - long-pipe fans stay exactly as before.
+                    spacing = own_room / slots
+                    if clearance is not None:
+                        spacing = min(spacing, max(clearance, turn_step))
+                    turn_u = min(base + nearness * spacing, own_far)
             else:
                 turn_u = turn_hi - nearness * turn_step
+                own_near = lo + own_margin
+                own_room = base - own_near
+                if own_room > 0.0 and (turn_starved or turn_u < own_near):
+                    spacing = own_room / slots
+                    if clearance is not None:
+                        spacing = min(spacing, max(clearance, turn_step))
+                    turn_u = max(base - nearness * spacing, own_near)
             turn_u = max(lo, min(hi, turn_u))   # stay on THIS pipe
             # User rule: onto a HORIZONTAL pipe the bend is a true 90
             # degrees - the climb is perpendicular to the pipe, so it can

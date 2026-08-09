@@ -937,3 +937,63 @@ def test_unfixable_breaks_report_no_shortfall():
                                2.0, 4.0, 3.0, 'h')
     if not plan[0]['angle_ok']:
         assert plan[0]['shortfall'] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Turn-fan distribution by pipe length (user rule, 2026-08-09)
+# ---------------------------------------------------------------------------
+def _fan_items(specs):
+    """[(pos, span)] -> h-bundle items with a common exit edge."""
+    return [{'key': i, 'pos': pos, 'span': span, 'exit_edge': 5.0}
+            for i, (pos, span) in enumerate(specs)]
+
+
+def _turns(plan):
+    return {e['key']: e['end'][0] for e in plan}
+
+
+def test_a_short_pipe_no_longer_drags_the_whole_fan_tight():
+    # Two long pipes and one short: the common window is the
+    # intersection, starved by the short member. Every tag now spreads
+    # over ITS OWN pipe's room - the long-pipe tags fan wide again.
+    items = _fan_items([(-20.0, (0.0, 200.0)),
+                      (-22.0, (0.0, 200.0)),
+                      (-24.0, (0.0, 9.0))])
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=2.0)
+    turns = _turns(plan)
+    for entry in plan:
+        lo, hi = items[entry['key']]['span']
+        assert lo <= turns[entry['key']] <= hi     # each on its own pipe
+    long_turns = sorted([turns[0], turns[1]])
+    # Long pipes keep clearance spacing (the 'no issues' behaviour) -
+    # the OLD code piled every turn on one point of the starved window.
+    assert long_turns[1] - long_turns[0] >= 2.0 - 1e-9
+    assert turns[2] <= 9.0                         # short stays on its pipe
+
+
+def test_an_unstarved_fan_keeps_the_common_spacing():
+    # All pipes long: the window is not starved, so the behaviour is
+    # exactly the pre-change one - clearance-spaced common slots.
+    items = _fan_items([(-20.0, (0.0, 200.0)),
+                      (-22.0, (0.0, 200.0)),
+                      (-24.0, (0.0, 200.0))])
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=2.0)
+    turns = sorted(_turns(plan).values())
+    assert turns[1] - turns[0] == pytest.approx(2.0)
+    assert turns[2] - turns[1] == pytest.approx(2.0)
+
+
+def test_all_short_pipes_spread_instead_of_piling():
+    # The sliver case: every pipe short. Arrows must not stack on one
+    # point; they spread evenly across each pipe's own room.
+    items = _fan_items([(-20.0, (0.0, 14.0)),
+                      (-22.0, (0.0, 14.0)),
+                      (-24.0, (0.0, 14.0))])
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT, 0.0,
+                               2.0, 4.0, 3.0, 'h', clearance=2.0)
+    turns = sorted(_turns(plan).values())
+    assert len(set(round(t, 6) for t in turns)) == 3   # all distinct
+    assert turns[1] - turns[0] > 0.5
+    assert turns[2] - turns[1] > 0.5
