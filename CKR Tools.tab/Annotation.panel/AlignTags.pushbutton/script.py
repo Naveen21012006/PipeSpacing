@@ -562,41 +562,9 @@ def side_mode(config, anchor2d, bundle, base_items):
 _CORRECT_MIN_MM = 10.0     # drawn-corner misses below this are left alone
 _CORRECT_MAX_MM = 5000.0   # and above this the box is broken, not the pick
 
-_CHAR_WIDTH_FACTOR = 0.6   # mean glyph width as a fraction of text height
-
-
-def _text_width_hint(wrapper, view):
-    """Estimate of a tag's drawn text width, in feet, or None.
-
-    From the tag's OWN text and its type's text size, so no bounding box
-    is involved. ~10% accurate - the cold-start fallback for exit-left
-    corners until a learned head-to-edge distance exists.
-    """
-    try:
-        element = wrapper.element
-        if wrapper.kind == 'textnote':
-            return float(element.Width)      # exact, already model units
-        text = getattr(element, 'TagText', None)
-        if not text:
-            return None
-        longest = max(len(line) for line in (text.splitlines() or [text]))
-        symbol = getattr(element, 'Symbol', None)
-        if symbol is None:
-            return None
-        from Autodesk.Revit.DB import BuiltInParameter
-        param = symbol.get_Parameter(BuiltInParameter.TEXT_SIZE)
-        if param is None:
-            return None
-        size_ft = float(param.AsDouble())    # paper units
-        scale = float(getattr(view, 'Scale', 1) or 1)
-        return longest * size_ft * _CHAR_WIDTH_FACTOR * scale
-    except Exception as ex:
-        common.logger.debug('Text width hint failed: {}'.format(ex))
-        return None
-
 
 def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None,
-                          leader_rises=None, text_left=None):
+                          leader_rises=None):
     """Residual of the DRAWN bottom-left corner against the pick.
 
     Measured AFTER placement, in the leader state the tag is actually
@@ -627,11 +595,6 @@ def correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v=None,
     du = dv = 0.0
     if u_span is not None and engine.exit_sign(mode) > 0.0:
         du = u_span[0] - anchor2d[0]
-    elif text_left is not None:
-        # Exit-left: the box's left edge is leader, so the caller hands
-        # in the datum edge derived another way (learned head-to-edge
-        # distance, or the text-width fallback).
-        du = text_left - anchor2d[0]
     if v_span is not None:
         if leader_rises:
             dv = v_span[0] - anchor2d[1]
@@ -1093,26 +1056,6 @@ def final_arrangement(records, config, basis):
                   len(moved), remaining)
 
 
-def _learn_left_distance(head_u, u_span):
-    """Bank the family's drawn head-to-left-edge distance for later.
-
-    Exit-right picks can MEASURE the left edge; exit-left picks cannot
-    (it carries the leader) but place the head exactly. The distance
-    between them is a family constant - the 2026-08-02 logs show it
-    stable to the millimetre across picks and sessions - so what the
-    left side measures, the right side can spend.
-    """
-    left_mm = common.feet_to_mm(head_u - u_span[0])
-    if left_mm <= 0.0:
-        return
-    values = settings.load()
-    if abs(values.get('learned_left_mm', 0.0) - left_mm) > 5.0:
-        values['learned_left_mm'] = left_mm
-        settings.save(values)
-        file_log.info('Learned head-to-left-edge distance: %.0fmm.',
-                      left_mm)
-
-
 def _drawn_correction(targets, plan, anchor2d, mode, basis):
     """Measure the drawn bottom row against the pick; None if nothing to fix.
 
@@ -1126,29 +1069,6 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
     view = doc.ActiveView
     u_span = common.extent_along(wrapper.element, view, basis[0])
     v_span = common.extent_along(wrapper.element, view, basis[1])
-
-    # Exit-right: the left edge is measured directly - and banked, so
-    # exit-left picks can use it. Exit-left: derive the edge from the
-    # exactly-placed head and the banked distance, falling back to the
-    # text-width estimate against the clean right edge on a cold start.
-    text_left = None
-    if u_span is not None:
-        if engine.exit_sign(mode) > 0.0:
-            _learn_left_distance(bottom['head'][0], u_span)
-        else:
-            learned_mm = settings.load().get('learned_left_mm', 0.0)
-            if learned_mm > 0.0:
-                text_left = bottom['head'][0] \
-                    - common.mm_to_feet(learned_mm)
-            else:
-                width = _text_width_hint(wrapper, view)
-                if width:
-                    text_left = u_span[1] - width
-                    file_log.info(
-                        'Exit-left corner from text-width estimate '
-                        '(%.0fmm) - place one left-hand stack to teach '
-                        'the exact distance.',
-                        common.feet_to_mm(width))
 
     # Which way does the DRAWN leader leave the text? The mode cannot be
     # trusted for this - a Lower-mode pick above a horizontal run still
@@ -1173,9 +1093,9 @@ def _drawn_correction(targets, plan, anchor2d, mode, basis):
             common.logger.debug('Elbow read failed: {}'.format(ex))
 
     fix = correction_from_spans(u_span, v_span, anchor2d, mode, elbow_v,
-                                leader_rises=rises, text_left=text_left)
+                                leader_rises=rises)
     if fix is None and engine.exit_sign(mode) < 0.0 \
-            and text_left is None and not rises and elbow_v is None:
+            and not rises and elbow_v is None:
         file_log.info('Drawn corner not verifiable for %s (leader covers '
                       'both datum sides).', mode)
     return fix
