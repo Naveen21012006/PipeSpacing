@@ -447,18 +447,23 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
 
     rows = [0] * count
     if zero:
-        # Risers seen in plan are POINTS sharing one u, so the
-        # left-to-right key ties on every one of them and the rows came
-        # out in arbitrary order against the circles - leaders crossed
-        # at the column (user's image, 2026-08-10). Tie-break by the
-        # point's HEIGHT, topmost first: top circle <-> top tag, and
-        # crossings become impossible, the riser analogue of
-        # "leftmost pipe = top tag".
-        verticals = sorted(
-            (i for i in range(count) if owns[i] == 'v'),
-            key=lambda i: (float(items[i]['pos']),
-                           -(float(items[i]['span'][0])
-                             + float(items[i]['span'][1])) / 2.0))
+        # Risers seen in plan are POINTS, and their circles are staggered
+        # a few hundred mm apart by pipe size - so a left-to-right key
+        # ordered them by that stagger noise and the leaders crossed
+        # (user's images, 2026-08-10, twice: the second because a mere
+        # TIE-BREAK on height never fired for staggered circles). For a
+        # point, HEIGHT is the primary key, topmost circle <-> top tag -
+        # the riser analogue of "leftmost pipe = top tag". True vertical
+        # pipes keep the left-to-right rule; in a mixed group the points
+        # take the upper rows, deterministically.
+        def _v_key(i):
+            span_lo = float(items[i]['span'][0])
+            span_hi = float(items[i]['span'][1])
+            if span_hi - span_lo <= 1e-9:
+                return (0, -(span_lo + span_hi) / 2.0)
+            return (1, float(items[i]['pos']))
+        verticals = sorted((i for i in range(count) if owns[i] == 'v'),
+                           key=_v_key)
         horizontals = sorted((i for i in range(count) if owns[i] == 'h'),
                              key=lambda i: -float(items[i]['pos']))
         for position, item_index in enumerate(verticals + horizontals):

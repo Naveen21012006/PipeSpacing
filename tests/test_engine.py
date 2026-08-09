@@ -1003,8 +1003,13 @@ def test_all_short_pipes_spread_instead_of_piling():
 # Risers in plan: point targets (user rules, 2026-08-10)
 # ---------------------------------------------------------------------------
 def _riser_items(circle_vs, u=100.0):
-    """Vertical pipes seen end-on: point spans at one u, stacked in v."""
-    return [{'key': i, 'own': 'v', 'pos': u, 'span': (v, v)}
+    """Drops seen end-on: point spans, u STAGGERED by pipe size.
+
+    The stagger is the real-world case that broke the first fix: a
+    height tie-break never fires when the primary left-to-right key
+    differs by the elbows' few-hundred-mm offsets.
+    """
+    return [{'key': i, 'own': 'v', 'pos': u + 0.3 * i, 'span': (v, v)}
             for i, v in enumerate(circle_vs)]
 
 
@@ -1030,9 +1035,10 @@ def test_riser_leader_approaches_dead_level_at_the_circle():
     plan = engine.plan_ordered((140.0, 0.0), items, engine.UPPER_RIGHT,
                                0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
     for entry in plan:
-        assert entry['end'][0] == pytest.approx(100.0)      # on the point
+        own_u = 100.0 + 0.3 * entry['key']
+        assert entry['end'][0] == pytest.approx(own_u)      # on the point
         assert entry['elbow'][1] == pytest.approx(entry['end'][1])  # level
-        assert entry['elbow'][0] == pytest.approx(102.0)    # clearance off
+        assert entry['elbow'][0] == pytest.approx(own_u + 2.0)  # clearance off
         assert entry['straight']
         assert entry['angle_ok']
 
