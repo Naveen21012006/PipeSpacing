@@ -89,6 +89,17 @@ implements, so you can verify output rather than trust it:
 
 - **Ordering**: vertical bundles read left pipe → top tag; horizontal bundles
   top pipe → top tag. Sort is side-invariant.
+- **Riser clusters** (any item a point, every item a point or carrying its
+  arrow as `item['arrow']` — build_ordered_bundle attaches it) split by
+  where the drops sit (2026-08-10, user-approved):
+  - circles BESIDE the row band → order by circle HEIGHT (topmost → top
+    tag), shape = short landing + parallel slants at the cluster's shared
+    angle;
+  - circles wholly ABOVE or BELOW the band → order by circle U, direction
+    "nearest row takes nearest drop" (stack above + exit left = leftmost →
+    top, mirrored on the other three sides), shape = landing out to the
+    circle's column + a CLEAN VERTICAL drop/climb (no slant).
+  Both come free from `engine.plan_ordered` — pass the arrows, don't sort.
 - **Level with a vertical pipe** → one straight horizontal leader, elbow grip
   parked at the line's midpoint.
 - **Reaching a horizontal pipe** → horizontal landing + TRUE 90° bend onto

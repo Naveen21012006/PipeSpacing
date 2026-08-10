@@ -446,6 +446,7 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             owns.append(bundle)
 
     rows = [0] * count
+    vertical_drops = False    # riser cluster wholly above/below the rows
     if zero:
         # Risers seen in plan are POINTS, and their circles are staggered
         # a few hundred mm apart by pipe size - so a left-to-right key
@@ -476,11 +477,42 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
             lo, hi = items[i]['span']
             return (float(lo) + float(hi)) / 2.0
 
+        def _drop_u(i):
+            arrow = items[i].get('arrow')
+            if arrow is not None:
+                return float(arrow[0])
+            return float(items[i]['pos'])    # a point's pos is its u
+
         any_point = any(_is_point(i) for i in range(count))
         all_droppable = all(items[i].get('arrow') is not None
                             or _is_point(i) for i in range(count))
         if any_point and all_droppable:
-            ordering = sorted(range(count), key=lambda i: -_drop_v(i))
+            # Which way do the leaders travel? Circles wholly BELOW or
+            # wholly ABOVE the row band mean a VERTICAL approach - and
+            # there height is noise (the user's six level circles spread
+            # 3.3m sideways, 2026-08-10) while the horizontal position
+            # decides everything: a lower row's landing collides with an
+            # upper row's drop exactly when it must reach PAST that
+            # drop's column. Crossing-free assignment = the row nearest
+            # the pipes takes the drop nearest the stack, marching
+            # outward - which is the user's "leftmost on top, rightmost
+            # on bottom" for a stack above with leaders exiting left,
+            # and its mirror on the other three sides. Circles BESIDE
+            # the stack keep the height order (topmost circle <-> top
+            # tag, the approved parallel-slant look).
+            drop_vs = [_drop_v(i) for i in range(count)]
+            top_line = anchor_v + (count - 1) * step
+            below = max(drop_vs) < anchor_v
+            above = min(drop_vs) > top_line
+            if below or above:
+                vertical_drops = True
+                ascend = (below and sign < 0) or (above and sign > 0)
+                u_dir = 1.0 if ascend else -1.0
+                ordering = sorted(
+                    range(count),
+                    key=lambda i: (u_dir * _drop_u(i), -_drop_v(i)))
+            else:
+                ordering = sorted(range(count), key=lambda i: -_drop_v(i))
         else:
             def _v_key(i):
                 span_lo = float(items[i]['span'][0])
@@ -532,7 +564,10 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
         v_points = [i for i in v_indices
                     if float(items[i]['span'][1])
                     - float(items[i]['span'][0]) <= 1e-9]
-        if v_points:
+        # Vertical-approach clusters drop STRAIGHT down (or climb
+        # straight up) onto their circles - no shared slant (user's
+        # choice, 2026-08-10: "clean vertical drop").
+        if v_points and not vertical_drops:
             ratios = []
             for i in v_points:
                 pv = float(items[i]['span'][0])
@@ -662,7 +697,12 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
                 # 7.5-degree hops and the per-leader level approach).
                 pv = (lo + hi) / 2.0
                 dv = abs(pv - line_v)
-                if point_slant_tan is not None and dv > 1e-9:
+                if vertical_drops:
+                    # Cluster wholly above/below the rows: landing out
+                    # to the circle's column, then a clean VERTICAL
+                    # drop/climb onto it (user's choice, 2026-08-10).
+                    elbow_u = pos
+                elif point_slant_tan is not None and dv > 1e-9:
                     elbow_u = pos - sign * (dv / point_slant_tan)
                 else:
                     # Level with its circle: land straight into it.

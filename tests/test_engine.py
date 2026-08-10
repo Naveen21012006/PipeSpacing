@@ -1091,7 +1091,9 @@ def test_riser_mixed_directions_order_by_arrow_drop():
         {'key': 3, 'own': 'h', 'pos': 26.0, 'span': (100.0, 140.0),
          'arrow': (101.0, 15.0)},
     ]
-    plan = engine.plan_ordered((160.0, 0.0), items, engine.UPPER_RIGHT,
+    # Anchor v=12: the rows sit BESIDE the drops (band 12..21 overlaps
+    # 15..30), so the side-approach height order applies.
+    plan = engine.plan_ordered((160.0, 12.0), items, engine.UPPER_RIGHT,
                                0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
     rows = dict((e['key'], e['row']) for e in plan)
     # Drop heights 30 > 25 > 20 > 15: rows interleave the two directions.
@@ -1125,6 +1127,86 @@ def test_pure_run_stack_ignores_arrows():
                                0.0, 3.0, 4.0, 3.0, 'h', clearance=2.0)
     rows = dict((e['key'], e['row']) for e in plan)
     assert rows[0] == 1 and rows[1] == 0   # by pipe v, not arrow v
+
+
+def _drop_items(us, v):
+    """Level riser circles spread along u, tagged from above or below."""
+    return [{'key': i, 'own': 'v', 'pos': u, 'span': (v, v),
+             'arrow': (u, v)} for i, u in enumerate(us)]
+
+
+def test_drops_below_exit_left_read_left_to_right():
+    # The user's six F/B-T/A tags (2026-08-10): stack ABOVE level
+    # circles spread sideways, leaders exiting left then dropping.
+    # Leftmost circle -> TOP row, rightmost -> bottom; a lower row's
+    # landing then never reaches past an upper row's drop column.
+    items = _drop_items([20.0, 40.0, 30.0], v=-50.0)
+    plan = engine.plan_ordered((70.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    assert rows[0] == 2      # u=20 leftmost -> top
+    assert rows[2] == 1      # u=30
+    assert rows[1] == 0      # u=40 rightmost -> bottom
+
+
+def test_drops_below_exit_right_mirror_the_order():
+    # Stack above but leaders exit RIGHT: the mirror - rightmost -> top.
+    items = _drop_items([80.0, 100.0, 90.0], v=-50.0)
+    plan = engine.plan_ordered((10.0, 0.0), items, engine.UPPER_LEFT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    assert rows[1] == 2      # u=100 rightmost -> top
+    assert rows[2] == 1
+    assert rows[0] == 0      # u=80 leftmost -> bottom
+
+
+def test_drops_above_exit_left_put_rightmost_on_top():
+    # Stack BELOW the circles, leaders exit left and climb: a lower
+    # row's climb must not pass through a higher row's landing, so the
+    # order reverses - rightmost -> top.
+    items = _drop_items([20.0, 40.0, 30.0], v=50.0)
+    plan = engine.plan_ordered((70.0, 0.0), items, engine.LOWER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    assert rows[1] == 2      # u=40 rightmost -> top
+    assert rows[2] == 1
+    assert rows[0] == 0      # u=20 leftmost -> bottom
+
+
+def test_vertical_drops_are_clean_verticals_not_slants():
+    # User's choice 2026-08-10: above/below clusters get a landing out
+    # to the circle's column and a TRUE vertical entry - no shared
+    # slant, elbow exactly over the circle, elbow on the landing line.
+    items = _drop_items([20.0, 40.0, 30.0], v=-50.0)
+    plan = engine.plan_ordered((70.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    for entry in plan:
+        assert entry['straight']
+        assert entry['end'][1] == pytest.approx(-50.0)     # on the circle
+        assert entry['elbow'][0] == pytest.approx(entry['end'][0])
+        assert entry['elbow'][1] == pytest.approx(entry['line_v'])
+
+
+def test_vertical_drop_leaders_cannot_cross():
+    # Brute-force the no-crossing guarantee for the drops-from-above
+    # case, arbitrary circle scatter.
+    items = _drop_items([20.0, 44.0, 26.0, 38.0, 32.0], v=-50.0)
+    plan = engine.plan_ordered((70.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    per_tag = [engine.leader_segments(entry) for entry in plan]
+
+    def crosses(p1, p2, p3, p4):
+        def orient(a, b, c):
+            return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+        d1, d2 = orient(p3, p4, p1), orient(p3, p4, p2)
+        d3, d4 = orient(p1, p2, p3), orient(p1, p2, p4)
+        return ((d1 > 1e-9) != (d2 > 1e-9)) and ((d3 > 1e-9) != (d4 > 1e-9))
+
+    for a in range(len(per_tag)):
+        for b in range(a + 1, len(per_tag)):
+            for s1 in per_tag[a]:
+                for s2 in per_tag[b]:
+                    assert not crosses(s1[0], s1[1], s2[0], s2[1])
 
 
 def test_riser_slant_angle_is_clamped_to_a_readable_range():
