@@ -5,6 +5,9 @@ tab with a **Piping** panel:
 
 - **Pipe Spacing** — re-space parallel pipe runs around a fixed reference.
 - **Pipe Insulation** — auto-apply / update pipe insulation to company standards.
+
+a **Filter Group** panel:
+
 - **Level Adjustment** — find the piping in a plan view that belongs to
   another level, and leave only that on screen.
 - **Workset Filter** — tick the worksets to hide in the active view;
@@ -56,7 +59,8 @@ No other downloads are needed; the tools use only the Revit API and pyRevit.
 
 4. Click **pyRevit → Reload**.
 
-5. A new **MEP Tools** tab appears with a **Piping** panel and the tool buttons.
+5. A new **MEP Tools** tab appears with **Piping**, **Filter Group** and
+   **Annotation** panels and the tool buttons.
 
 > CLI alternative (instead of steps 2–4):
 > `pyrevit extensions paths add "C:\PyRevitExtensions"` then `pyrevit reload`
