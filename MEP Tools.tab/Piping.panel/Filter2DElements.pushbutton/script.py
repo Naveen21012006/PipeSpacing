@@ -4,16 +4,18 @@
 Collects every element visible in the active view, sorts it into 2D
 annotation and 3D model, and temporarily hides the 3D side with Revit's
 Temporary Hide/Isolate - leaving only text notes, detail lines, detail
-components, filled regions, dimensions, tags, revision clouds, spot
-dimensions, generic annotations, detail groups and the rest of the
-view-specific elements on screen for review. A summary reports how many 2D
-elements stayed visible and how many 3D elements were hidden.
+components, filled regions, tags, revision clouds, spot dimensions,
+generic annotations, detail groups and the rest of the view-specific
+elements on screen for review. A summary reports how many 2D elements
+stayed visible and how many elements were hidden.
 
 An element counts as 2D when it is view-specific (it lives in this view
-only), or when its category is an annotation category - which keeps datum
-annotations such as grids and levels on screen too. Model and analytical
-categories count as 3D and are hidden; anything Revit keeps for internal
-bookkeeping is left alone.
+only), or when its category is an annotation category. Datum and
+reference marks are the exception: grids, levels, reference planes,
+dimensions and the section / elevation / callout marks of other views are
+hidden along with the model - the review is about drafting content, and
+they only clutter it. Model and analytical categories count as 3D and are
+hidden; anything Revit keeps for internal bookkeeping is left alone.
 
 The tool is non-destructive along every path: no element, no view
 visibility setting and no model data is modified - only a temporary view
@@ -37,6 +39,7 @@ Target: Revit 2022-2026 / pyRevit / IronPython
 from pyrevit import revit, forms, script
 
 from Autodesk.Revit.DB import (
+    BuiltInCategory,
     CategoryType,
     ElementId,
     FilteredElementCollector,
@@ -64,6 +67,27 @@ HIDDEN_ENVVAR = 'CKR_2DFILTER_HIDDEN'
 CLASS_2D = '2d'
 CLASS_3D = '3d'
 CLASS_OTHER = 'other'
+CLASS_EXCLUDED = 'excluded'
+
+# Annotation categories hidden by default even though they are 2D: datum
+# and reference marks only clutter an annotation review.
+_EXCLUDED_BUILTIN_CATEGORIES = (
+    BuiltInCategory.OST_Grids,
+    BuiltInCategory.OST_Levels,
+    BuiltInCategory.OST_CLines,           # reference planes
+    BuiltInCategory.OST_Dimensions,
+    BuiltInCategory.OST_Sections,
+    BuiltInCategory.OST_Elev,             # elevation marks
+    BuiltInCategory.OST_Callouts,
+    BuiltInCategory.OST_ReferenceViewer,  # reference callout heads
+    BuiltInCategory.OST_Viewers,          # section / callout viewer lines
+)
+EXCLUDED_CATEGORY_IDS = set()
+for _excluded_category in _EXCLUDED_BUILTIN_CATEGORIES:
+    try:
+        EXCLUDED_CATEGORY_IDS.add(int(_excluded_category))
+    except Exception:
+        pass  # category not present in this Revit version
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +254,7 @@ def restore_view(view, record):
 
     forms.alert(
         'View restored.\n\n'
-        '{} 3D model element(s) are visible again in "{}".\n\n'
+        '{} hidden element(s) are visible again in "{}".\n\n'
         'Click 2D Elements Filter again to re-apply the filter.'.format(
             _count(record.get('count_3d', 0)), _name(view)),
         title=TOOL_TITLE)
@@ -259,22 +283,27 @@ def reset_temporary_hide_isolate(view):
 # Step 3 - Collect and classify the visible elements
 # ---------------------------------------------------------------------------
 def classify_element(element):
-    """Sort one element into the 2D, 3D or leave-alone bucket.
+    """Sort one element into the 2D, 3D, excluded or leave-alone bucket.
 
-    View-specific elements are the 2D side by definition - they exist in
-    this view only. Everything else is judged by its category type:
-    annotation categories (grids, levels, reference planes and the other
-    datum marks) stay with the 2D side, model and analytical categories are
-    the 3D side, and elements with no category or an internal one are
-    Revit bookkeeping that is best left untouched.
+    The excluded categories are checked first, because some of them
+    (dimensions) are view-specific and would otherwise land in the 2D
+    bucket. After that, view-specific elements are the 2D side by
+    definition - they exist in this view only. Everything else is judged
+    by its category type: annotation categories stay with the 2D side,
+    model and analytical categories are the 3D side, and elements with no
+    category or an internal one are Revit bookkeeping that is best left
+    untouched.
     """
+    category = element.Category
+    if category is not None and _eid(category.Id) in EXCLUDED_CATEGORY_IDS:
+        return CLASS_EXCLUDED
+
     try:
         if element.ViewSpecific:
             return CLASS_2D
     except Exception:
         pass
 
-    category = element.Category
     if category is None:
         return CLASS_OTHER
 
@@ -305,42 +334,60 @@ def _category_label(element):
 
 
 def collect_view_elements(view):
-    """Split the visible elements of the view into 2D and 3D.
+    """Split the visible elements of the view into 2D, 3D and excluded.
 
     One view-scoped collector reads the whole view in a single pass - it
     already excludes hidden elements and everything the view range or V/G
     settings filter out, so classification is the only per-element work.
-    ``CanBeHidden`` is asked only of the 3D side, where it matters.
+    ``CanBeHidden`` is asked only of the sides that get hidden, where it
+    matters.
 
     Returns:
-        tuple: (hide_ids, counts_2d, count_3d, skipped) where hide_ids is a
-        list of ElementId to hide, counts_2d maps category name -> visible
-        2D element count, count_3d is how many 3D elements will be hidden,
-        and skipped is how many 3D elements refused to be hidden.
+        tuple: (hide_ids, counts_2d, count_3d, counts_excluded, skipped)
+        where hide_ids is a list of ElementId to hide, counts_2d maps
+        category name -> visible 2D element count, count_3d is how many 3D
+        model elements will be hidden, counts_excluded maps category name
+        -> count for the 2D categories hidden by default, and skipped is
+        how many elements refused to be hidden.
     """
     collector = (FilteredElementCollector(doc, view.Id)
                  .WhereElementIsNotElementType())
 
     hide_ids = []
     counts_2d = {}
+    counts_excluded = {}
+    count_3d = 0
     skipped = 0
     for element in collector:
-        # A view element inside a view is a viewport marker (section line,
-        # elevation tag callout...), not something to hide from itself.
         if isinstance(element, View):
-            continue
+            # The active view returns itself in its own collector - leave
+            # it alone. Every other view element here draws a mark on this
+            # view (section line, elevation arrow, callout box): hidden by
+            # default.
+            if _eid(element.Id) == _eid(view.Id):
+                continue
+            bucket = CLASS_EXCLUDED
+        else:
+            bucket = classify_element(element)
 
-        bucket = classify_element(element)
         if bucket == CLASS_2D:
             label = _category_label(element)
             counts_2d[label] = counts_2d.get(label, 0) + 1
         elif bucket == CLASS_3D:
             if _can_hide(element, view):
                 hide_ids.append(element.Id)
+                count_3d += 1
+            else:
+                skipped += 1
+        elif bucket == CLASS_EXCLUDED:
+            if _can_hide(element, view):
+                hide_ids.append(element.Id)
+                label = _category_label(element)
+                counts_excluded[label] = counts_excluded.get(label, 0) + 1
             else:
                 skipped += 1
 
-    return hide_ids, counts_2d, len(hide_ids), skipped
+    return hide_ids, counts_2d, count_3d, counts_excluded, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +419,10 @@ def hide_elements_temporarily(view, element_ids):
 # ---------------------------------------------------------------------------
 # Step 5 - Completion summary
 # ---------------------------------------------------------------------------
-def show_summary(view, counts_2d, count_3d, skipped):
+def show_summary(view, counts_2d, count_3d, counts_excluded, skipped):
     """Report what the filter did, with the 2D side broken down by category."""
     count_2d = sum(counts_2d.values())
+    count_excluded = sum(counts_excluded.values())
 
     lines = [
         '2D Elements Filter applied.',
@@ -382,11 +430,22 @@ def show_summary(view, counts_2d, count_3d, skipped):
         'Active view : {}'.format(_name(view)),
         '2D elements visible : {}'.format(_count(count_2d)),
         '3D elements hidden : {}'.format(_count(count_3d)),
-        '',
-        '2D elements by category:',
     ]
+    if count_excluded:
+        lines.append('Datum / reference marks hidden : {}'.format(
+            _count(count_excluded)))
+    lines.append('')
+    lines.append('2D elements by category:')
     for label in sorted(counts_2d, key=lambda name: (-counts_2d[name], name)):
         lines.append('  - {} : {}'.format(label, _count(counts_2d[label])))
+
+    if count_excluded:
+        lines.append('')
+        lines.append('Hidden by default:')
+        for label in sorted(counts_excluded,
+                            key=lambda name: (-counts_excluded[name], name)):
+            lines.append('  - {} : {}'.format(
+                label, _count(counts_excluded[label])))
 
     if skipped:
         lines.append('')
@@ -426,7 +485,8 @@ def main():
     reset_temporary_hide_isolate(view)
 
     # Step 3: collect the visible elements and split them 2D / 3D.
-    hide_ids, counts_2d, count_3d, skipped = collect_view_elements(view)
+    hide_ids, counts_2d, count_3d, counts_excluded, skipped = \
+        collect_view_elements(view)
 
     if not counts_2d:
         forms.alert(
@@ -448,11 +508,11 @@ def main():
     # Step 4: hide the 3D side, then remember the run for the next click.
     if not hide_elements_temporarily(view, hide_ids):
         return
-    remember_hidden(view, sum(counts_2d.values()), count_3d)
+    remember_hidden(view, sum(counts_2d.values()), len(hide_ids))
     _refresh()
 
     # Step 5: report.
-    show_summary(view, counts_2d, count_3d, skipped)
+    show_summary(view, counts_2d, count_3d, counts_excluded, skipped)
 
 
 # ---------------------------------------------------------------------------
