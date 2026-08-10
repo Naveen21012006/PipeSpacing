@@ -14,7 +14,7 @@ import engine
 
 _SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'CKR Tools.tab', 'Annotation.panel', 'AlignTags.pushbutton', 'script.py')
+    'MEP Tools.tab', 'Annotation.panel', 'AlignTags.pushbutton', 'script.py')
 
 
 class _CommonStub(object):

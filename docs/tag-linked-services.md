@@ -12,7 +12,7 @@ departs from the brief and why, and how to run the acceptance tests.
 
 The brief specifies a C# add-in with an MSI, a multi-targeted solution and
 a WPF/MVVM project layout. It has been built instead as a **pyRevit tool
-inside the existing `CKR Tools` extension**, alongside Pipe Spacing, Auto
+inside the existing `MEP Tools` extension**, alongside Pipe Spacing, Auto
 Tag and Align Tags, because that is what this repository is and what the
 office already deploys.
 

@@ -1,6 +1,6 @@
 # Auto Tag → Align Tags formatting handoff
 
-For the chat working on `CKR Tools.tab/Annotation.panel/TagAlignment.pushbutton`
+For the chat working on `MEP Tools.tab/Annotation.panel/TagAlignment.pushbutton`
 (Auto Tag). Goal: tags that Auto Tag places come out formatted **exactly like
 Align Tags at angle 0** with the user's approved defaults — same datum, same
 leader shapes, same spacing — so a stack made by either tool is

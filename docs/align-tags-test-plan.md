@@ -12,7 +12,7 @@ and a leadered text note.
 
 ## Phase A — Align Tags command + configuration dialog
 
-Setup once: pyRevit → Reload; confirm the **CKR Tools** tab → **Annotation**
+Setup once: pyRevit → Reload; confirm the **MEP Tools** tab → **Annotation**
 panel shows the new **Align Tags** button beside **Auto Tag**.
 
 | # | Spec item | Steps | Pass when |

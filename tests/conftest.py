@@ -15,7 +15,7 @@ import os
 import sys
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_ANNOTATION = os.path.join(_REPO_ROOT, 'CKR Tools.tab', 'Annotation.panel')
+_ANNOTATION = os.path.join(_REPO_ROOT, 'MEP Tools.tab', 'Annotation.panel')
 _BUNDLE = os.path.join(_ANNOTATION, 'AlignTags.pushbutton')
 _TAGLINKED_LIB = os.path.join(_ANNOTATION, 'TagLinkedServices.pushbutton',
                               'lib')

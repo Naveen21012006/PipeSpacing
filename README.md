@@ -1,6 +1,6 @@
-# CKR Tools — pyRevit Extension
+# MEP Tools — pyRevit Extension
 
-A small pyRevit extension of MEP tools. It adds a **CKR Tools** ribbon
+A small pyRevit extension of MEP tools. It adds an **MEP Tools** ribbon
 tab with a **Piping** panel:
 
 - **Pipe Spacing** — re-space parallel pipe runs around a fixed reference.
@@ -56,7 +56,7 @@ No other downloads are needed; the tools use only the Revit API and pyRevit.
 
 4. Click **pyRevit → Reload**.
 
-5. A new **CKR Tools** tab appears with a **Piping** panel and the tool buttons.
+5. A new **MEP Tools** tab appears with a **Piping** panel and the tool buttons.
 
 > CLI alternative (instead of steps 2–4):
 > `pyrevit extensions paths add "C:\PyRevitExtensions"` then `pyrevit reload`
@@ -167,9 +167,12 @@ individually.
 
 One click strips the model out of the active view so the annotations can be
 reviewed on their own — text notes, detail lines, detail components, filled
-regions, dimensions, tags, revision clouds, spot dimensions, generic
-annotations, detail groups and every other view-specific element stay on
-screen; every visible 3D model element is hidden.
+regions, tags, revision clouds, spot dimensions, generic annotations,
+detail groups and every other view-specific element stay on screen; every
+visible 3D model element is hidden, and so are the datum and reference
+marks — grids, levels, reference planes, dimensions and the section /
+elevation / callout marks of other views — which would only clutter the
+review.
 
 1. Open the view to review (plan, ceiling plan, section, elevation,
    drafting or 3D view).
@@ -179,8 +182,9 @@ screen; every visible 3D model element is hidden.
 3. Click it again to restore the view.
 
 An element counts as 2D when it is view-specific, or when its category is
-an annotation category — so datum marks such as grids and levels stay on
-screen too. The hide is Revit's Temporary Hide/Isolate, applied per view —
+an annotation category — except the datum and reference marks above, which
+are hidden by default. The hide is Revit's Temporary Hide/Isolate, applied
+per view —
 view settings and the model itself are never modified, and the view control
 bar's **Reset Temporary Hide/Isolate** clears it like any other. The button
 toggles like Level Adjustment and Workset Filter, and each view remembers
@@ -246,6 +250,10 @@ annotating.
 5. **Preview** reports the counts without leaving a single tag behind, so
    the thresholds can be tuned against real numbers. **Place Tags** commits,
    as one undo step.
+
+The tags it just created are left **selected**, so **Align Tags** can stack
+them straight away without picking them again. A preview selects nothing —
+its tags never existed.
 
 Four things it gets right that a first attempt usually does not:
 
