@@ -456,17 +456,45 @@ def plan_ordered(anchor, items, mode, angle_deg, vertical_spacing,
         # the riser analogue of "leftmost pipe = top tag". True vertical
         # pipes keep the left-to-right rule; in a mixed group the points
         # take the upper rows, deterministically.
-        def _v_key(i):
-            span_lo = float(items[i]['span'][0])
-            span_hi = float(items[i]['span'][1])
-            if span_hi - span_lo <= 1e-9:
-                return (0, -(span_lo + span_hi) / 2.0)
-            return (1, float(items[i]['pos']))
-        verticals = sorted((i for i in range(count) if owns[i] == 'v'),
-                           key=_v_key)
-        horizontals = sorted((i for i in range(count) if owns[i] == 'h'),
-                             key=lambda i: -float(items[i]['pos']))
-        for position, item_index in enumerate(verticals + horizontals):
+        #
+        # A riser cluster can also arrive as a MIX of directions: T/B
+        # tags reference run pipes or drop stubs, whose own geometry
+        # sits at the RUN's level, not the drop's. Sub-grouping by that
+        # geometry paired same-service rows and forced a crossing
+        # (2026-08-10). When the cluster contains a point and EVERY item
+        # knows its drop (its arrow, or is itself a point), the whole
+        # stack orders by drop height instead - topmost drop <-> top
+        # row, one key, no sub-groups, no crossing.
+        def _is_point(i):
+            lo, hi = items[i]['span']
+            return float(hi) - float(lo) <= 1e-9
+
+        def _drop_v(i):
+            arrow = items[i].get('arrow')
+            if arrow is not None:
+                return float(arrow[1])
+            lo, hi = items[i]['span']
+            return (float(lo) + float(hi)) / 2.0
+
+        any_point = any(_is_point(i) for i in range(count))
+        all_droppable = all(items[i].get('arrow') is not None
+                            or _is_point(i) for i in range(count))
+        if any_point and all_droppable:
+            ordering = sorted(range(count), key=lambda i: -_drop_v(i))
+        else:
+            def _v_key(i):
+                span_lo = float(items[i]['span'][0])
+                span_hi = float(items[i]['span'][1])
+                if span_hi - span_lo <= 1e-9:
+                    return (0, -(span_lo + span_hi) / 2.0)
+                return (1, float(items[i]['pos']))
+            verticals = sorted((i for i in range(count)
+                                if owns[i] == 'v'), key=_v_key)
+            horizontals = sorted((i for i in range(count)
+                                  if owns[i] == 'h'),
+                                 key=lambda i: -float(items[i]['pos']))
+            ordering = verticals + horizontals
+        for position, item_index in enumerate(ordering):
             rows[item_index] = count - 1 - position   # first = TOP row
     else:
         order = sorted(range(count),

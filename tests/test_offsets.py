@@ -28,6 +28,10 @@ class _CommonStub(object):
     def feet_to_mm(value):
         return value * 304.8
 
+    @staticmethod
+    def to_2d(point, basis):
+        return (point[0], point[1])
+
 
 class _LogStub(object):
     def info(self, *args):
@@ -36,7 +40,7 @@ class _LogStub(object):
 
 def _load_pure_parts():
     source = open(_SCRIPT).read()
-    start = source.index('def ordered_offsets')
+    start = source.index('def build_ordered_bundle')
     end = source.index('_MODE_NAMES = {')
     namespace = {'engine': engine, 'common': _CommonStub,
                  'file_log': _LogStub(), 'FITTING_CLEARANCE_MM': 250.0}
@@ -50,6 +54,7 @@ bundle_centre_u = _PARTS['bundle_centre_u']
 side_mode = _PARTS['side_mode']
 ordered_plan = _PARTS['ordered_plan']
 _median = _PARTS['_median']
+build_ordered_bundle = _PARTS['build_ordered_bundle']
 
 
 class _Tag(object):
@@ -263,6 +268,75 @@ def test_horizontal_bundles_use_their_run_midpoint():
 
 def test_an_empty_bundle_does_not_explode():
     assert bundle_centre_u('v', []) == 0.0
+
+
+def test_bundle_centre_reads_each_item_on_its_own_axis():
+    # 2026-08-10: a riser point kept inside an 'h' bundle stores its
+    # span in v (heights, ~123m in the model); reading that span as u
+    # dragged the centre kilometres off and every click voted LEFT -
+    # 29 picks on one cluster, all LL, the side unpickable.
+    base_items = [
+        {'own': 'v', 'pos': 67.6, 'span': (123.0, 123.0)},   # riser point
+        {'own': 'h', 'pos': 122.9, 'span': (60.0, 80.0)},    # run pipe
+    ]
+    centre = bundle_centre_u('h', base_items)
+    assert centre == pytest.approx((67.6 + 70.0) / 2.0)
+    # And a run item inside a 'v' bundle reads its span, not its v pos.
+    assert bundle_centre_u('v', [{'own': 'h', 'pos': 122.9,
+                                  'span': (60.0, 80.0)}]) \
+        == pytest.approx(70.0)
+
+
+def test_side_mode_right_of_the_drops_wins_beside_runs():
+    # Reconstruction of the pinned session: circles at u ~ 67.6, clicks
+    # at 68-71 (right of the drops) must vote RIGHT even though a run's
+    # span stretches away and the points' spans hold heights.
+    base_items = [
+        {'own': 'v', 'pos': 67.6, 'span': (123.0, 123.0)},
+        {'own': 'v', 'pos': 67.6, 'span': (122.6, 122.6)},
+        {'own': 'h', 'pos': 122.9, 'span': (67.6, 72.0)},
+    ]
+    cfg = _config(engine.LOWER_LEFT)
+    assert side_mode(cfg, (69.5, 123.0), 'h', base_items) \
+        == engine.LOWER_RIGHT
+    assert side_mode(cfg, (60.0, 123.0), 'h', base_items) \
+        == engine.LOWER_LEFT
+
+
+class _FakePipeTag(object):
+    """A target for build_ordered_bundle: a curve and an arrow."""
+
+    def __init__(self, a, b, arrow=None):
+        self._a, self._b = a, b
+        if arrow is not None:
+            self.primary_end2d = arrow
+
+    def tagged_curve(self):
+        return (self._a, self._b)
+
+
+def test_build_ordered_bundle_attaches_each_tags_arrow():
+    # Every item carries its existing arrow so the engine can order a
+    # riser stack by the drops rather than the referenced pipes.
+    targets = [
+        _FakePipeTag((100.0, 30.0), (100.0, 30.0), arrow=(100.0, 30.0)),
+        _FakePipeTag((100.0, 27.0), (140.0, 27.0), arrow=(101.0, 25.0)),
+    ]
+    bundle, items = build_ordered_bundle(targets, None, True)
+    assert bundle == 'h'
+    assert items[0]['arrow'] == (100.0, 30.0)
+    assert items[1]['arrow'] == (101.0, 25.0)
+    # The point runs across the bundle: ordered on the bundle axis by
+    # its arrow, and its own v-form (pos = u, span = heights) is kept.
+    assert items[0]['order_pos'] == 30.0
+    assert items[0]['own'] == 'v'
+
+
+def test_build_ordered_bundle_survives_targets_without_arrows():
+    targets = [_FakePipeTag((100.0, 30.0), (100.0, 30.0)),
+               _FakePipeTag((100.0, 27.0), (140.0, 27.0))]
+    bundle, items = build_ordered_bundle(targets, None, True)
+    assert all('arrow' not in item for item in items)
 
 
 # ---------------------------------------------------------------------------

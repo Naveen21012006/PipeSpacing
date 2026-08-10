@@ -424,33 +424,55 @@ def measure_layout(targets, basis):
                 head2d = common.to_2d(wrapper.get_head(), basis)
                 u_lo, u_hi = u_span
                 v_lo, v_hi = v_span
+                # Leader-proof width from the tag's own text: the sanity
+                # check ordered_offsets uses when the box is inflated by
+                # a surviving leader (re-runs measured 10-14m "text").
+                # Computed BEFORE the symmetric trim, which needs it as
+                # a floor.
+                wrapper.text_width_hint = _text_width_hint(
+                    wrapper, doc.ActiveView)
                 # Backstop against leaders that survived suppression: a
                 # tag family's head sits at the text centre, so the true
                 # text extent is at most 2x the nearer head-to-edge
                 # distance per axis - a surviving leader inflates ONE
                 # side only. Cap and log when the raw bbox disagrees.
+                # The centre assumption is PER PROJECT: in this model the
+                # head sits ON the text's left edge, so the symmetric
+                # width is ~0 and the trim erased every real 1.6m box to
+                # nothing ("capped to 0mm", all sessions 2026-08-10).
+                # The tag's own text width is the floor: a trim that
+                # would leave less than the text itself is provably
+                # wrong, so the box is kept for the downstream hint cap
+                # and learned widths to sort out.
                 if wrapper.kind in ('tag', 'spatial'):
+                    # 50mm: no drawn text is narrower, any scale - the
+                    # last-resort floor when the text hint is unknown.
+                    floor_w = max(wrapper.text_width_hint or 0.0,
+                                  common.mm_to_feet(50.0))
                     sym_w = 2.0 * min(head2d[0] - u_lo, u_hi - head2d[0])
                     if sym_w > 0.0 and (u_hi - u_lo) > 1.5 * sym_w:
-                        file_log.info(
-                            'Tag %s: width %.0fmm capped to %.0fmm '
-                            '(leader survived suppression).',
-                            wrapper.id_value,
-                            common.feet_to_mm(u_hi - u_lo),
-                            common.feet_to_mm(sym_w))
-                        u_lo = head2d[0] - sym_w / 2.0
-                        u_hi = head2d[0] + sym_w / 2.0
+                        if sym_w < floor_w:
+                            file_log.info(
+                                'Tag %s: head off-centre (symmetric '
+                                'width %.0fmm < text %.0fmm); box kept.',
+                                wrapper.id_value,
+                                common.feet_to_mm(sym_w),
+                                common.feet_to_mm(floor_w))
+                        else:
+                            file_log.info(
+                                'Tag %s: width %.0fmm capped to %.0fmm '
+                                '(leader survived suppression).',
+                                wrapper.id_value,
+                                common.feet_to_mm(u_hi - u_lo),
+                                common.feet_to_mm(sym_w))
+                            u_lo = head2d[0] - sym_w / 2.0
+                            u_hi = head2d[0] + sym_w / 2.0
                     sym_h = 2.0 * min(head2d[1] - v_lo, v_hi - head2d[1])
                     if sym_h > 0.0 and (v_hi - v_lo) > 1.5 * sym_h:
                         v_lo = head2d[1] - sym_h / 2.0
                         v_hi = head2d[1] + sym_h / 2.0
                 wrapper.bbox2d = (u_lo, u_hi, v_lo, v_hi)
                 wrapper.head_ref2d = head2d
-                # Leader-proof width from the tag's own text: the sanity
-                # check ordered_offsets uses when the box is inflated by
-                # a surviving leader (re-runs measured 10-14m "text").
-                wrapper.text_width_hint = _text_width_hint(
-                    wrapper, doc.ActiveView)
                 height = wrapper.height_hint()
                 if height is None:
                     height = v_hi - v_lo
@@ -499,6 +521,15 @@ def build_ordered_bundle(targets, basis, straight_mode):
         else:
             item = {'key': i, 'own': 'h', 'pos': (a[1] + b[1]) / 2.0,
                     'span': (min(a[0], b[0]), max(a[0], b[0]))}
+        # The tag's existing arrow: where its leader actually lands. In
+        # riser clusters the referenced pipe's own geometry can sit at
+        # the RUN's level rather than the drop's (a T/B tag reads the
+        # run), so ordering by pipe coordinates paired same-service rows
+        # together and forced a crossing (2026-08-10). The arrow is the
+        # per-drop truth; the engine orders riser stacks by it.
+        drop = getattr(targets[i], 'primary_end2d', None)
+        if drop is not None:
+            item['arrow'] = (drop[0], drop[1])
         if own != bundle:
             # Cross-running pipe: order it in the stack by where its
             # arrow actually sits on the bundle axis.
@@ -600,10 +631,17 @@ def bundle_centre_u(bundle, base_items):
     Taken from the pipe geometry and never from the arrowheads: applying
     a pick moves the arrowheads, and the side must not depend on what a
     previous pick did.
+
+    Each item is read on its OWN axis, never the bundle's: a riser point
+    kept as a cross item inside an 'h' bundle stores its span in v, and
+    reading that span as u averaged a HEIGHT (~123m in this model) into
+    the centre - every click then voted LEFT and the side was unpickable
+    (2026-08-10, 29 picks on one riser cluster, all LL).
     """
     values = []
     for item in base_items:
-        if bundle == 'v':
+        own = item.get('own')
+        if own == 'v' or (own is None and bundle == 'v'):
             values.append(float(item['pos']))       # the pipe's own u
         else:
             lo, hi = item['span']                   # pipe runs along u

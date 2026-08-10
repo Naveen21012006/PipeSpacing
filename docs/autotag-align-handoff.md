@@ -54,7 +54,11 @@ and produced stacks whose X ignored the pick entirely, which read as a bug
 in field use (frame-measured: 0 px horizontal response across 8 picks).
 
 - **Side** — unchanged: geometric, per cluster, from the pick's u against
-  the pipes' mean u. Upper/Lower from the dialog `mode`.
+  the pipes' mean u. Upper/Lower from the dialog `mode`. The mean reads
+  EACH pipe on its own axis (riser points contribute their u=`pos`, never
+  their span — a point's span holds HEIGHTS; averaging one in pinned the
+  side LEFT for a whole session, 2026-08-10). Import `bundle_centre_u`,
+  don't re-derive.
 - **Horizontal** — the pick's u IS the datum column, clamped so the text
   always fits between the column and the pipes:
   - stack LEFT of pipes (leaders exit right):

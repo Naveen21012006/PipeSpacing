@@ -1074,6 +1074,59 @@ def test_riser_leaders_cannot_cross():
                     assert not crosses(s1[0], s1[1], s2[0], s2[1])
 
 
+def test_riser_mixed_directions_order_by_arrow_drop():
+    # The pinned cluster of 2026-08-10: T/B tags reference RUN pipes, so
+    # two items arrive as own='h' with pos at the RUN's level - not the
+    # drop's. Sub-grouping by direction then paired same-service rows
+    # and forced a crossing. When the cluster holds a point and every
+    # item knows its drop (arrow, or is itself a point), the whole stack
+    # orders by drop height: topmost drop -> top row.
+    items = [
+        {'key': 0, 'own': 'v', 'pos': 100.0, 'span': (30.0, 30.0),
+         'arrow': (100.0, 30.0)},
+        {'key': 1, 'own': 'v', 'pos': 100.3, 'span': (20.0, 20.0),
+         'arrow': (100.3, 20.0)},
+        {'key': 2, 'own': 'h', 'pos': 27.0, 'span': (100.0, 140.0),
+         'arrow': (101.0, 25.0)},
+        {'key': 3, 'own': 'h', 'pos': 26.0, 'span': (100.0, 140.0),
+         'arrow': (101.0, 15.0)},
+    ]
+    plan = engine.plan_ordered((160.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    # Drop heights 30 > 25 > 20 > 15: rows interleave the two directions.
+    assert rows[0] == 3 and rows[2] == 2
+    assert rows[1] == 1 and rows[3] == 0
+
+
+def test_riser_mixed_without_arrows_keeps_subgroup_order():
+    # No arrows to trust -> the proven grouping stands: points take the
+    # upper rows, horizontals the lower, deterministically.
+    items = [
+        {'key': 0, 'own': 'v', 'pos': 100.0, 'span': (20.0, 20.0)},
+        {'key': 1, 'own': 'h', 'pos': 30.0, 'span': (100.0, 140.0)},
+    ]
+    plan = engine.plan_ordered((160.0, 0.0), items, engine.UPPER_RIGHT,
+                               0.0, 3.0, 4.0, 3.0, 'v', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    assert rows[0] == 1 and rows[1] == 0
+
+
+def test_pure_run_stack_ignores_arrows():
+    # No point in the cluster -> arrows must NOT reorder a run stack;
+    # the field-proven top-pipe-to-top-tag rule stands.
+    items = [
+        {'key': 0, 'own': 'h', 'pos': -20.0, 'span': (10.0, 90.0),
+         'arrow': (30.0, -60.0)},          # arrow deliberately misleading
+        {'key': 1, 'own': 'h', 'pos': -60.0, 'span': (10.0, 90.0),
+         'arrow': (30.0, -20.0)},
+    ]
+    plan = engine.plan_ordered((0.0, 0.0), items, engine.UPPER_LEFT,
+                               0.0, 3.0, 4.0, 3.0, 'h', clearance=2.0)
+    rows = dict((e['key'], e['row']) for e in plan)
+    assert rows[0] == 1 and rows[1] == 0   # by pipe v, not arrow v
+
+
 def test_riser_slant_angle_is_clamped_to_a_readable_range():
     # A circle nearly level with its row must not flatten the shared
     # angle below 15 degrees, and a deep drop must not steepen it past
