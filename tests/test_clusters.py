@@ -89,6 +89,28 @@ def test_bundle_perpendicular_never_chains():
     assert len(result) == 2
 
 
+def test_bundle_wider_rack_width_joins_spread_runs():
+    # The 2026-08-10 basement: parallel supply runs spaced wider than
+    # the old 600mm constant tagged one by one. The rack width is a
+    # setting now - at the old limit they split, at the project's value
+    # they chain into ONE stack (transitively, via adjacent gaps).
+    pipes = [_hpipe(0.0), _hpipe(2.4), _hpipe(4.8)]
+    arrows = [(50.0, 0.0), (50.5, 2.4), (51.0, 4.8)]
+    assert len(clusters.bundle_clusters(pipes, arrows, 2.0, 5.0)) == 3
+    assert clusters.bundle_clusters(pipes, arrows, 3.0, 5.0) == [[0, 1, 2]]
+
+
+def test_bundle_huge_rack_width_still_excludes_perpendicular():
+    # User rule (2026-08-10): "only similar orientation pipe to be
+    # clusters" - parallelism is a separate, unconditional gate, so no
+    # rack width can pull a nearby vertical pipe into a horizontal rack.
+    pipes = [_hpipe(0.0), _hpipe(2.4), _vpipe(50.0, lo=-10.0, hi=10.0)]
+    arrows = [(50.0, 0.0), (50.5, 2.4), (50.0, 1.0)]
+    result = clusters.bundle_clusters(pipes, arrows, 1e9, 1e9)
+    assert [0, 1] in result
+    assert [2] in result
+
+
 def test_bundle_two_racks_laterally_apart_stay_separate():
     # Two vertical risers 10 apart with arrows close in v: different
     # racks, different clusters - proximity chaining got this wrong.

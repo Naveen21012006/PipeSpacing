@@ -114,6 +114,7 @@
                     <RowDefinition/>
                     <RowDefinition/>
                     <RowDefinition/>
+                    <RowDefinition/>
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Vertical Spacing" VerticalAlignment="Center"
                            ToolTip="Clear gap between stacked tags - the measured tag height is added automatically, so the same gap works at any view scale."/>
@@ -134,7 +135,14 @@
                          ToolTip="Max arrow separation along the pipe run within one bundle. 0 = never split."/>
                 <TextBlock x:Name="ClusterUnit" Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
 
-                <CheckBox x:Name="IntermittentCheck" Grid.Row="3" Grid.ColumnSpan="4"
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Rack Width" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Max side-by-side pipe separation ACROSS the run within one bundle. Pipes spaced wider than this tag as separate stacks. Only parallel pipes ever chain - a perpendicular pipe never joins, whatever this value."/>
+                <TextBox x:Name="RackBox" Grid.Row="3" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"
+                         ToolTip="Max pipe-to-pipe offset across the rack. Raise it when parallel runs spaced wider than 600mm should form one stack."/>
+                <TextBlock x:Name="RackUnit" Grid.Row="3" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <CheckBox x:Name="IntermittentCheck" Grid.Row="4" Grid.ColumnSpan="4"
                           Content="Intermittent Alignment" Margin="0,8,0,0"
                           ToolTip="Staggered two-column layout at half the row height, using the Horizontal Spacing as the column offset. Ignored while Constant Landing is on."/>
             </Grid>

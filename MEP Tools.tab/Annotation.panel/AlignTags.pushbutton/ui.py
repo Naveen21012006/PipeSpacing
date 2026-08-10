@@ -73,6 +73,7 @@ class AlignTagsDialog(forms.WPFWindow):
         self.VerticalUnit.Text = unit
         self.HorizontalUnit.Text = unit
         self.ClusterUnit.Text = unit
+        self.RackUnit.Text = unit
 
         self.AngleSlider.Value = float(values['angle_deg'])
         self.AngleBox.Text = '{0:g}'.format(round(values['angle_deg'], 1))
@@ -81,6 +82,7 @@ class AlignTagsDialog(forms.WPFWindow):
         self.HorizontalBox.Text = self._format_mm(values['horizontal_mm'])
         self.ClusterBox.Text = self._format_mm(values.get('cluster_mm',
                                                           2000.0))
+        self.RackBox.Text = self._format_mm(values.get('rack_mm', 600.0))
 
         self.ConstantLandingCheck.IsChecked = values['constant_landing']
         self.IntermittentCheck.IsChecked = values['intermittent']
@@ -195,6 +197,9 @@ class AlignTagsDialog(forms.WPFWindow):
         cluster = self._mm_field(self.ClusterBox, 'Cluster Distance', 0.0)
         if cluster is None:
             return None
+        rack = self._mm_field(self.RackBox, 'Rack Width', 0.0)
+        if rack is None:
+            return None
 
         return {
             'mode': self._mode,
@@ -203,6 +208,7 @@ class AlignTagsDialog(forms.WPFWindow):
             'landing_mm': landing,
             'horizontal_mm': horizontal,
             'cluster_mm': cluster,
+            'rack_mm': rack,
             'constant_landing': bool(self.ConstantLandingCheck.IsChecked),
             'intermittent': bool(self.IntermittentCheck.IsChecked),
             'order_by_pipe': bool(self.OrderByPipeCheck.IsChecked),

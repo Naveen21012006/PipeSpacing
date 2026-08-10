@@ -38,6 +38,7 @@ producing angle-0 stacks. Pass a literal `0.0` to `plan_ordered`, always.
 | `vertical_mm` | **100** | **CLEAR GAP between texts, not row pitch.** Row pitch = tallest drawn text height + this. Your bridge currently passes it as centre-to-centre pitch — that stacks rows overlapping |
 | `horizontal_mm` | 50 | column offset for Intermittent only; inert at these defaults |
 | `cluster_mm` | **1500** | max arrow separation ALONG the run within one bundle; 0 = never split |
+| `rack_mm` | **600** default | rack width ACROSS the run — max side-by-side pipe separation within one bundle (new dialog field 2026-08-10; a basement's runs spaced 700–1300mm tagged one by one under the old constant). **Your `engine_bridge.py` has a COPIED `_BUNDLE_LATERAL_MM = 600` — replace it with this setting** (fall back to 600 only when the key is absent). Parallelism stays a separate gate: no rack width ever admits a perpendicular pipe |
 | `learned_left_mm` | (grows at runtime, currently ≈815) | the family's drawn head→text-left-edge distance, measured by Align Tags' self-correction. **Free calibration — use it (§4)** |
 | `attached_end` | true | free attached leader ends and PIN them so geometry is exact |
 | `justification` | automatic | TextNotes only — irrelevant to tags |

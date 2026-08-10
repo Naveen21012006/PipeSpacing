@@ -59,7 +59,8 @@ PICK_PROMPT = 'Pick lowest tag head position. Press Esc to finish.'
 # User-chosen constants (corner decision sheet, 2026-07-26):
 FITTING_CLEARANCE_MM = 250.0   # arrows keep this far from bends/ends
 CLUSTER_SPAN_CAP_MM = 4000.0   # auto-split chains wider than this
-BUNDLE_LATERAL_MM = 600.0      # rack width: max pipe-to-pipe offset
+BUNDLE_LATERAL_MM = 600.0      # rack width FALLBACK; the dialog's
+                               # rack_mm setting overrides (2026-08-10)
 
 # `None` is a keyword in Python, so the no-snapping enum member needs getattr.
 _SNAP_NONE = getattr(ObjectSnapTypes, 'None')
@@ -885,6 +886,13 @@ def split_clusters(targets, config, basis):
     to plain proximity chaining among themselves.
     """
     cluster_mm = float(config.get('cluster_mm', 0.0))
+    # Rack Width dialog field (2026-08-10): the lateral limit is per
+    # project - a basement's supply runs spaced 700-1300mm apart tagged
+    # one by one under the old 600mm constant, which survives only as
+    # the fallback for settings files predating the field. Parallelism
+    # stays a separate, unconditional gate: raising the rack width can
+    # never pull a perpendicular pipe into the stack.
+    rack_mm = float(config.get('rack_mm', BUNDLE_LATERAL_MM))
     count = len(targets)
     if cluster_mm <= 0.0 or count < 2:
         return [list(range(count))]
@@ -907,7 +915,7 @@ def split_clusters(targets, config, basis):
                   for i in piped]
         for members in clusters.bundle_clusters(
                 pipes, arrows,
-                common.mm_to_feet(BUNDLE_LATERAL_MM),
+                common.mm_to_feet(rack_mm),
                 common.mm_to_feet(cluster_mm)):
             groups.append([piped[m] for m in members])
     if plain:

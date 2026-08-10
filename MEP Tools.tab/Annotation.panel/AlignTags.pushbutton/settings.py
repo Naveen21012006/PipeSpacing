@@ -28,6 +28,11 @@ DEFAULTS = {
     'landing_mm': 1524.0,
     'horizontal_mm': 3048.0,
     'cluster_mm': 2000.0,   # 0 disables auto-splitting
+    # Rack width ACROSS the run: max side-by-side pipe separation within
+    # one bundle. Was the hard constant BUNDLE_LATERAL_MM (600) until
+    # 2026-08-10, when a basement's supply runs spaced 700-1300mm apart
+    # tagged one by one - the limit is per project, like everything else.
+    'rack_mm': 600.0,
     'switch_side': False,
     'attached_end': False,
     'keep_selection': True,
@@ -48,7 +53,7 @@ DEFAULTS = {
 _BOOL_KEYS = ('switch_side', 'attached_end', 'keep_selection', 'snaps_off',
               'constant_landing', 'intermittent', 'order_by_pipe')
 _FLOAT_KEYS = ('angle_deg', 'vertical_mm', 'landing_mm', 'horizontal_mm',
-               'cluster_mm')
+               'cluster_mm', 'rack_mm')
 _JUSTIFICATIONS = ('unchanged', 'left', 'right', 'automatic')
 
 
