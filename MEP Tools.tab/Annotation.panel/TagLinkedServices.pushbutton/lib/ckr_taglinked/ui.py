@@ -109,6 +109,7 @@ class TagLinkedServicesDialog(forms.WPFWindow):
         }
 
         self._build_links()
+        self._update_link_count()
         self._build_tag_rows()
         self._apply(self.values)
         self._rebuild_filters()
@@ -146,6 +147,51 @@ class TagLinkedServicesDialog(forms.WPFWindow):
             check.Unchecked += self._on_links_changed
             panel.Children.Add(check)
             self._link_checks.append((target, check))
+
+    def _selectable_links(self):
+        """Return the checkboxes of links that can actually be ticked."""
+        return [check for _target, check in self._link_checks
+                if check.IsEnabled]
+
+    def _set_links(self, mode):
+        """All / None / Invert over the link list.
+
+        Only loaded links respond: an unloaded or nested one has nothing
+        to read, so leaving it out of a bulk action is the same courtesy
+        as showing it disabled in the first place.
+
+        The filter lists are rebuilt ONCE at the end rather than on each
+        checkbox, which on a federation of a dozen links is the
+        difference between instant and a visible stall.
+        """
+        checks = self._selectable_links()
+        self._loading = True
+        try:
+            for check in checks:
+                if mode == 'all':
+                    check.IsChecked = True
+                elif mode == 'none':
+                    check.IsChecked = False
+                else:
+                    check.IsChecked = not check.IsChecked
+        finally:
+            self._loading = False
+        self._update_link_count()
+        self._rebuild_filters()
+
+    def _update_link_count(self):
+        """Keep the running count beside the All / None / Invert buttons."""
+        checks = self._selectable_links()
+        chosen = len([check for check in checks if check.IsChecked])
+        enabled = bool(checks)
+        for button in (self.LinksAllButton, self.LinksNoneButton,
+                       self.LinksInvertButton):
+            button.IsEnabled = enabled
+        if not enabled:
+            self.LinksCount.Text = 'no links can be read'
+            return
+        self.LinksCount.Text = '{0} of {1} selected'.format(chosen,
+                                                            len(checks))
 
     def selected_targets(self):
         """Return the LinkTargets currently ticked."""
@@ -327,6 +373,9 @@ class TagLinkedServicesDialog(forms.WPFWindow):
 
     # -- events -------------------------------------------------------------
     def _wire(self):
+        self.LinksAllButton.Click += self._on_links_all
+        self.LinksNoneButton.Click += self._on_links_none
+        self.LinksInvertButton.Click += self._on_links_invert
         self.PreviewButton.Click += self._on_preview
         self.PlaceButton.Click += self._on_place
         self.CancelButton.Click += self._on_cancel
@@ -335,9 +384,19 @@ class TagLinkedServicesDialog(forms.WPFWindow):
         self.ProfileDeleteButton.Click += self._on_profile_delete
         self.ProfileCombo.SelectionChanged += self._on_profile_selected
 
+    def _on_links_all(self, _sender, _args):
+        self._set_links('all')
+
+    def _on_links_none(self, _sender, _args):
+        self._set_links('none')
+
+    def _on_links_invert(self, _sender, _args):
+        self._set_links('invert')
+
     def _on_links_changed(self, _sender, _args):
         if self._loading:
             return
+        self._update_link_count()
         self._rebuild_filters()
 
     def _on_help(self, _sender, _args):

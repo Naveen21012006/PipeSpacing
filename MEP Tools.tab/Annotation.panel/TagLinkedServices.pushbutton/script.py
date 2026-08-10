@@ -31,6 +31,10 @@ if _LIB_DIR not in sys.path:
 
 from pyrevit import forms, revit, script
 
+from Autodesk.Revit.DB import ElementId
+
+from System.Collections.Generic import List
+
 from ckr_taglinked import (
     VERSION,
     compat,
@@ -154,13 +158,42 @@ def write_csv(results):
     return None
 
 
-def announce(results):
+def select_new_tags(results):
+    """Leave the tags this run created selected in the model.
+
+    The next thing anyone does after tagging is arrange the tags, and
+    Align Tags works on the selection - so the run hands its work
+    straight to it, and one Delete undoes a bad run without hunting.
+
+    A preview selects nothing: its tags were rolled back and their ids no
+    longer point at anything. Ids are checked before use, because a
+    selection call rejects the whole set if one member has gone.
+
+    Returns:
+        int: How many tags ended up selected.
+    """
+    if results.preview or not results.placed_ids:
+        return 0
+    try:
+        alive = [tag_id for tag_id in results.placed_ids
+                 if doc.GetElement(tag_id) is not None]
+        uidoc.Selection.SetElementIds(List[ElementId](alive))
+        return len(alive)
+    except Exception as ex:
+        log.warning('The new tags could not be selected: %s', ex)
+        return 0
+
+
+def announce(results, selected=0):
     """Print the full report, write the CSV, then show the summary."""
     report.print_report(results, output)
     path = write_csv(results)
     if path:
         output.print_md('CSV report: `{0}`'.format(path))
     lines = report.summary_lines(results)
+    if selected:
+        lines.append('{0} new tag(s) are selected - run Align Tags to '
+                     'arrange them.'.format(selected))
     if path:
         lines.append('A CSV copy is in {0}.'.format(REPORT_DIR))
     forms.alert('\n'.join(lines), title=TITLE)
@@ -210,7 +243,12 @@ def main():
             log.warning('Run blocked: %s', results.blocked.replace('\n', ' '))
             continue
 
-        announce(results)
+        # Select before reporting: the summary can then say how many are
+        # selected, and a modal dialog does not disturb a selection.
+        selected = select_new_tags(results)
+        announce(results, selected)
+        if selected:
+            log.info('%s new tag(s) left selected.', selected)
 
         if action != 'preview':
             return

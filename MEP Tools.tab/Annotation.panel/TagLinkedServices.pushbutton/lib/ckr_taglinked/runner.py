@@ -92,6 +92,10 @@ class RunResult(object):
         self.seconds = 0.0
         self.view_name = ''
         self.scanned = 0
+        #: ElementIds of the tags this run created, in placement order, so
+        #: the command can leave them selected. Emptied by a preview: its
+        #: tags are rolled back and the ids point at nothing afterwards.
+        self.placed_ids = []
 
     def result_for(self, key):
         for entry in self.categories:
@@ -467,15 +471,16 @@ def place_all(doc, view, values, candidates, results, volume, log,
                                      'link reference failed: {0}'.format(ex)))
                 continue
 
-            status, _tag, detail = placer.place(
+            status, tag, detail = placer.place(
                 reference, tag_type_id, candidate.classification,
                 candidate.segment, bool(row.get('leader', True)),
                 orientation)
 
-            if status == placement.PLACED:
+            if status in (placement.PLACED, placement.PLACED_CROWDED):
                 entry.placed += 1
-            elif status == placement.PLACED_CROWDED:
-                entry.placed += 1
+                if tag is not None:
+                    results.placed_ids.append(tag.Id)
+            if status == placement.PLACED_CROWDED:
                 entry.crowded += 1
             elif status == placement.NOT_VISIBLE:
                 entry.reject(REJECT_NOT_VISIBLE)
@@ -493,6 +498,7 @@ def place_all(doc, view, values, candidates, results, volume, log,
 
     if preview:
         group.RollBack()          # FR-08.2 / AT-11: nothing survives a preview
+        del results.placed_ids[:]  # those ids no longer point at anything
     else:
         group.Assimilate()        # one undo step (clause 7.7.1)
 

@@ -47,6 +47,22 @@
                             <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,6"
                                        Foreground="#5A6068"
                                        Text="Each placed instance is listed separately - a link placed twice has its own position, so it is tagged on its own terms. Unloaded links are shown disabled."/>
+                            <Grid DockPanel.Dock="Bottom" Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="LinksAllButton" Grid.Column="0" Content="All" Width="58" Padding="4,2"
+                                        ToolTip="Select every loaded link."/>
+                                <Button x:Name="LinksNoneButton" Grid.Column="1" Content="None" Width="58" Margin="6,0,0,0" Padding="4,2"
+                                        ToolTip="Clear the selection."/>
+                                <Button x:Name="LinksInvertButton" Grid.Column="2" Content="Invert" Width="58" Margin="6,0,0,0" Padding="4,2"
+                                        ToolTip="Swap what is selected for what is not."/>
+                                <TextBlock x:Name="LinksCount" Grid.Column="3" VerticalAlignment="Center"
+                                           HorizontalAlignment="Right" Foreground="#5A6068"/>
+                            </Grid>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel x:Name="LinksPanel"/>
                             </ScrollViewer>
