@@ -45,6 +45,8 @@ DEFAULTS = {
     'duplicate_tolerance_mm': 300.0,   # existing arrow within this = skip
     'min_elevation_diff_mm': 5.0,      # smaller rise/fall counts as flat
     'vertical_angle_deg': 80.0,        # steeper than this = a riser, skip
+    'rack_width_mm': 600.0,            # parallel pipes this close = a rack
+    'parallel_angle_tol_deg': 5.0,     # how parallel rack mates must be
 }
 
 
@@ -200,6 +202,166 @@ def tilt_angle(direction):
     """
     horizontal = math.hypot(direction[0], direction[1])
     return math.atan2(-direction[2], horizontal)
+
+
+# ---------------------------------------------------------------------------
+# Parallel racks - shared arrow columns
+# ---------------------------------------------------------------------------
+# Along-run overlap two pipes must share before they count as side by
+# side. Also what excludes collinear end-to-end segments of one straight
+# run - those touch at a point and never overlap.
+_OVERLAP_EPS = 10.0
+
+
+def _plan_unit(high, low):
+    """Unit plan (XY) vector along the pipe, or None when degenerate."""
+    vx = low[0] - high[0]
+    vy = low[1] - high[1]
+    n = math.hypot(vx, vy)
+    if n < 1e-9:
+        return None
+    return (vx / n, vy / n)
+
+
+def _proj(origin, axis, point):
+    """Scalar coordinate of a point along an axis through origin (plan)."""
+    return ((point[0] - origin[0]) * axis[0] +
+            (point[1] - origin[1]) * axis[1])
+
+
+def _are_rack_mates(a_ends, a_dir, b_ends, b_dir, config):
+    """True when two sloped pipes run side by side as one rack.
+
+    Parallel within the angle tolerance, laterally within the rack
+    width, and overlapping along the run - so end-to-end segments and
+    pipes in different rooms of the same corridor never chain.
+    """
+    sin_tol = math.sin(math.radians(
+        config.get('parallel_angle_tol_deg', 5.0)))
+    cross = abs(a_dir[0] * b_dir[1] - a_dir[1] * b_dir[0])
+    if cross > sin_tol:
+        return False
+
+    origin = a_ends[0]
+    mid_x = (b_ends[0][0] + b_ends[1][0]) / 2.0 - origin[0]
+    mid_y = (b_ends[0][1] + b_ends[1][1]) / 2.0 - origin[1]
+    lateral = abs(mid_x * a_dir[1] - mid_y * a_dir[0])
+    if lateral > config['rack_width_mm']:
+        return False
+
+    a_span = (0.0, _proj(origin, a_dir, a_ends[1]))
+    b_span = (_proj(origin, a_dir, b_ends[0]),
+              _proj(origin, a_dir, b_ends[1]))
+    overlap = (min(max(a_span[0], a_span[1]), max(b_span[0], b_span[1])) -
+               max(min(a_span[0], a_span[1]), min(b_span[0], b_span[1])))
+    return overlap > _OVERLAP_EPS
+
+
+def bundle_arrow_points(pipe_ends, config):
+    """Return the arrow points per pipe, column-aligned across racks.
+
+    pipe_ends: [(high, low)] of the SLOPED pipes, higher endpoint first.
+
+    Returns (points_per_pipe, racks). points_per_pipe[i] is the list of
+    3D arrow points for pipe i: its own midpoint/stations when it stands
+    alone, or points shared with its rack so parallel neighbours show
+    their arrows in a straight column. racks lists the aligned
+    index-groups (multi-pipe bundles only).
+
+    Rack columns sit on the rack's common overlap span - one column for
+    a short overlap, one per started multi-arrow threshold for a long
+    one. A member pipe whose own end clearance cannot reach a column is
+    nudged to its nearest valid spot rather than skipped. A chained rack
+    with no span common to ALL members falls back to per-pipe positions.
+    rack_width_mm <= 0 switches clustering off.
+    """
+    count = len(pipe_ends)
+    points = []
+    for high, low in pipe_ends:
+        stations = arrow_stations(distance(high, low), config)
+        points.append(arrow_points(high, low, stations))
+
+    if count < 2 or config.get('rack_width_mm', 0.0) <= 0.0:
+        return points, []
+
+    directions = [_plan_unit(high, low) for high, low in pipe_ends]
+
+    # Pairwise mates, then transitive components (a rack is a chain).
+    adjacency = [[] for _ in range(count)]
+    for i in range(count):
+        if directions[i] is None:
+            continue
+        for j in range(i + 1, count):
+            if directions[j] is None:
+                continue
+            if _are_rack_mates(pipe_ends[i], directions[i],
+                               pipe_ends[j], directions[j], config):
+                adjacency[i].append(j)
+                adjacency[j].append(i)
+
+    seen = set()
+    racks = []
+    for start in range(count):
+        if start in seen or not adjacency[start]:
+            continue
+        queue = [start]
+        seen.add(start)
+        members = []
+        while queue:
+            k = queue.pop()
+            members.append(k)
+            for m in adjacency[k]:
+                if m not in seen:
+                    seen.add(m)
+                    queue.append(m)
+        members.sort()
+
+        # The longest member's direction is the rack axis.
+        ref = max(members,
+                  key=lambda k: distance(pipe_ends[k][0], pipe_ends[k][1]))
+        origin = pipe_ends[ref][0]
+        axis = directions[ref]
+
+        spans = {}
+        common_lo = None
+        common_hi = None
+        for k in members:
+            s_high = _proj(origin, axis, pipe_ends[k][0])
+            s_low = _proj(origin, axis, pipe_ends[k][1])
+            spans[k] = (s_high, s_low)
+            lo, hi = min(s_high, s_low), max(s_high, s_low)
+            common_lo = lo if common_lo is None else max(common_lo, lo)
+            common_hi = hi if common_hi is None else min(common_hi, hi)
+
+        if common_hi - common_lo <= _OVERLAP_EPS:
+            continue    # chained rack, no common span: keep per-pipe points
+
+        stations = arrow_stations(common_hi - common_lo, config)
+        clearance = config['end_clearance_mm']
+        for k in members:
+            s_high, s_low = spans[k]
+            denom = s_low - s_high
+            high, low = pipe_ends[k]
+            length = distance(high, low)
+            if length <= 2.0 * clearance:
+                t_lo = t_hi = 0.5
+            else:
+                t_lo = clearance / length
+                t_hi = 1.0 - t_lo
+            member_points = []
+            for station in stations:
+                if abs(denom) < 1e-6:
+                    t = 0.5
+                else:
+                    t = (common_lo + station - s_high) / denom
+                t = min(max(t, t_lo), t_hi)
+                member_points.append((high[0] + (low[0] - high[0]) * t,
+                                      high[1] + (low[1] - high[1]) * t,
+                                      high[2] + (low[2] - high[2]) * t))
+            points[k] = member_points
+        racks.append(members)
+
+    return points, racks
 
 
 # ---------------------------------------------------------------------------

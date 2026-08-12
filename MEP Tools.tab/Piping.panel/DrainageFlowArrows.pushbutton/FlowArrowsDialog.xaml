@@ -1,0 +1,73 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Drainage Flow Arrows"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <StackPanel Margin="14" Width="340">
+
+        <GroupBox Header="Placement Rules" Padding="6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="170"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="36"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                    <RowDefinition/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Minimum Pipe Length" VerticalAlignment="Center"
+                           ToolTip="Pipes shorter than this (measured in 3D along the pipe) get no arrow."/>
+                <TextBox x:Name="MinLengthBox" Grid.Row="0" Grid.Column="2" Margin="6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="0" Grid.Column="3" Text="mm" VerticalAlignment="Center"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Multi-Arrow Threshold" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="One arrow per started length: up to this length one arrow at the midpoint, longer pipes one arrow per started multiple (12 m at 10000 = two arrows)."/>
+                <TextBox x:Name="ThresholdBox" Grid.Row="1" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="1" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="End Clearance" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Arrows keep at least this far from the pipe ends and their fittings."/>
+                <TextBox x:Name="ClearanceBox" Grid.Row="2" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="2" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Duplicate Tolerance" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="An existing flow arrow within this distance of a calculated spot suppresses the new arrow, so re-running never doubles up."/>
+                <TextBox x:Name="ToleranceBox" Grid.Row="3" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="3" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Rack Width" VerticalAlignment="Center" Margin="0,6,0,0"
+                           ToolTip="Parallel pipes within this distance of each other form a rack and show their arrows in one straight column across the run. 0 turns the alignment off."/>
+                <TextBox x:Name="RackWidthBox" Grid.Row="4" Grid.Column="2" Margin="6,6,6,2"
+                         VerticalAlignment="Center" HorizontalContentAlignment="Right"/>
+                <TextBlock Grid.Row="4" Grid.Column="3" Text="mm" VerticalAlignment="Center" Margin="0,6,0,0"/>
+            </Grid>
+        </GroupBox>
+
+        <TextBlock Margin="0,10,0,0" TextWrapping="Wrap" Foreground="#5A6068" FontSize="11"
+                   Text="A plain click runs with these values and the remembered arrow type. Shift+click reopens this dialog and asks the arrow type again. Preselect pipes to arrow just those."/>
+
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="SaveButton" Grid.Column="1" Content="Save &amp; Run" Width="100" Padding="4"
+                    Margin="0,0,8,0" IsDefault="True" FontWeight="Bold"/>
+            <Button x:Name="CancelButton" Grid.Column="2" Content="Cancel" Width="70" Padding="4"
+                    IsCancel="True"/>
+        </Grid>
+    </StackPanel>
+</Window>

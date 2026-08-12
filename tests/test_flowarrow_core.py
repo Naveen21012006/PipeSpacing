@@ -176,3 +176,107 @@ def test_vertical_screen_flow_reads_bottom_to_top():
     # flow matches the readable (Right) head and downward flips to Left.
     assert core.arrow_side(0.0, 1.0) == core.RIGHT
     assert core.arrow_side(0.0, -1.0) == core.LEFT
+
+
+# ---------------------------------------------------------------------------
+# Parallel racks - shared arrow columns
+# ---------------------------------------------------------------------------
+def _pipe(x0, y, x1, z0=100.0, z1=0.0):
+    """A sloped pipe running along X at offset y, higher end first."""
+    return ((x0, y, z0), (x1, y, z1))
+
+
+def test_parallel_neighbours_share_a_column():
+    # Staggered segments 300 mm apart: arrows must line up, not sit at
+    # each pipe's own midpoint (the staggered-arrows screenshot case).
+    pipes = [_pipe(0.0, 0.0, 8000.0), _pipe(1000.0, 300.0, 9000.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == [[0, 1]]
+    assert points[0][0][0] == pytest.approx(points[1][0][0])
+
+
+def test_lone_pipe_keeps_its_own_midpoint():
+    pipes = [_pipe(0.0, 0.0, 8000.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == []
+    assert points[0][0][0] == pytest.approx(4000.0)
+
+
+def test_wide_or_perpendicular_pipes_do_not_cluster():
+    wide = [_pipe(0.0, 0.0, 8000.0), _pipe(0.0, 1000.0, 8000.0)]
+    assert core.bundle_arrow_points(wide, dict(CFG))[1] == []
+    perpendicular = [_pipe(0.0, 0.0, 8000.0),
+                     ((4000.0, -3000.0, 100.0), (4000.0, 3000.0, 0.0))]
+    assert core.bundle_arrow_points(perpendicular, dict(CFG))[1] == []
+
+
+def test_collinear_end_to_end_segments_do_not_cluster():
+    pipes = [_pipe(0.0, 0.0, 8000.0), _pipe(8000.0, 0.0, 16000.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == []
+    assert points[0][0][0] == pytest.approx(4000.0)
+    assert points[1][0][0] == pytest.approx(12000.0)
+
+
+def test_racks_chain_transitively():
+    pipes = [_pipe(0.0, 0.0, 8000.0),
+             _pipe(0.0, 500.0, 8000.0),
+             _pipe(0.0, 1000.0, 8000.0)]   # 0-2 are 1 m apart, chained via 1
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == [[0, 1, 2]]
+    xs = [pts[0][0] for pts in points]
+    assert xs[0] == pytest.approx(xs[1])
+    assert xs[1] == pytest.approx(xs[2])
+
+
+def test_long_rack_gets_aligned_columns_per_threshold():
+    pipes = [_pipe(0.0, 0.0, 25000.0), _pipe(0.0, 300.0, 25000.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == [[0, 1]]
+    assert len(points[0]) == 3          # ceil(25 / 10) on the overlap
+    for a, b in zip(points[0], points[1]):
+        assert a[0] == pytest.approx(b[0])
+
+
+def test_member_that_cannot_reach_the_column_is_nudged():
+    # The pipes only overlap over their last 1.5 m, so the shared column
+    # (overlap midpoint, x=750) falls inside both pipes' end clearance -
+    # each arrow is nudged to its nearest valid spot, never dropped.
+    pipes = [_pipe(0.0, 0.0, 20000.0), _pipe(-8000.0, 300.0, 1500.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == [[0, 1]]
+    # abs=1: the clearance fraction uses the 3D length, x is its plan
+    # projection, so a sloped pipe lands a hair inside the exact limit.
+    assert points[0][0][0] == pytest.approx(1000.0, abs=1.0)  # at clearance
+    assert points[1][0][0] == pytest.approx(500.0, abs=1.0)   # 1 m from end
+    assert len(points[0]) == 1 and len(points[1]) == 1
+
+
+def test_opposite_flows_still_align():
+    # One pipe drains left-to-right, its neighbour right-to-left: the
+    # arrow positions still form one column.
+    a = ((0.0, 0.0, 100.0), (8000.0, 0.0, 0.0))
+    b = ((8000.0, 300.0, 100.0), (0.0, 300.0, 0.0))
+    points, racks = core.bundle_arrow_points([a, b], dict(CFG))
+    assert racks == [[0, 1]]
+    assert points[0][0][0] == pytest.approx(points[1][0][0])
+
+
+def test_rack_width_zero_disables_clustering():
+    config = dict(CFG)
+    config['rack_width_mm'] = 0.0
+    pipes = [_pipe(0.0, 0.0, 8000.0), _pipe(1000.0, 300.0, 9000.0)]
+    points, racks = core.bundle_arrow_points(pipes, config)
+    assert racks == []
+    assert points[0][0][0] == pytest.approx(4000.0)
+    assert points[1][0][0] == pytest.approx(5000.0)
+
+
+def test_arrow_z_stays_on_each_pipes_own_centreline():
+    pipes = [_pipe(0.0, 0.0, 8000.0, z0=200.0, z1=0.0),
+             _pipe(0.0, 300.0, 8000.0, z0=100.0, z1=0.0)]
+    points, racks = core.bundle_arrow_points(pipes, dict(CFG))
+    assert racks == [[0, 1]]
+    # Same station, but each arrow keeps its own pipe's elevation there.
+    assert points[0][0][2] == pytest.approx(100.0)
+    assert points[1][0][2] == pytest.approx(50.0)

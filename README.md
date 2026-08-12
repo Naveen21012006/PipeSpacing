@@ -105,17 +105,29 @@ Places flow arrows on the inclined drainage pipes visible in the active view.
 The arrow direction comes from the pipe's actual endpoint elevations — always
 from the higher end toward the lower end — never from the drawing direction.
 
-1. Open the view and click **Drainage Flow Arrows**.
-2. Tick the piping systems that are the drainage ones (every system in the
-   view is listed with its pipe count).
+1. Open the view and click **Drainage Flow Arrows** — or preselect some
+   pipes first to arrow just those (the selection is the filter, so the
+   system picker is skipped; fittings caught by a window selection are
+   ignored).
+2. With no preselection, tick the piping systems that are the drainage ones
+   (every system in the view is listed with its pipe count).
 3. Pick the flow-arrow family type. Every loaded family whose name contains
    *arrow* or *flow* is offered; if none exists, the tool says so and stops.
+   The choice is remembered — later plain clicks skip this picker;
+   **Shift+click** the button to change the arrow type or the placement
+   numbers (minimum length, multi-arrow threshold, end clearance, duplicate
+   tolerance, rack width). Settings persist to
+   `%APPDATA%\CKR\flow_arrow_settings.json`.
 4. A completion report shows pipes checked, sloped pipes, arrows created,
    duplicates skipped, and each skipped/failed pipe with its reason.
 
 Short eligible pipes get one arrow at the midpoint; pipes longer than 10 m get
 one arrow per started 10 m (12 m → two, 25 m → three), spread evenly and kept
-1 m clear of the ends.
+1 m clear of the ends. Parallel pipes running side by side within the **Rack
+Width** (600 mm default) form a rack and show their arrows in one straight
+column across the run instead of each pipe's own midpoint; a rack member
+whose fitting break can't reach the column is nudged to its nearest valid
+spot rather than left arrowless. Rack Width 0 turns the alignment off.
 Vertical pipes, level pipes and pipes under 1 m are skipped. An existing flow
 arrow within 0.3 m of a calculated spot suppresses the new one, so re-running
 the tool never doubles up — and one run is one undo step. Model families are
