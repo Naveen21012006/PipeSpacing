@@ -5,6 +5,8 @@ tab with a **Piping** panel:
 
 - **Pipe Spacing** — re-space parallel pipe runs around a fixed reference.
 - **Pipe Insulation** — auto-apply / update pipe insulation to company standards.
+- **Drainage Flow Arrows** — place flow arrows on sloped drainage pipes,
+  pointing from the higher end to the lower end.
 
 a **Filter Group** panel:
 
@@ -96,6 +98,32 @@ fittings and valves — in the active floor plan, based on company standards.
 
 All insulation standards live in the `INSULATION_STANDARDS` config block at the
 top of that tool's `script.py` — edit there to change the rules.
+
+### Drainage Flow Arrows
+
+Places flow arrows on the inclined drainage pipes visible in the active view.
+The arrow direction comes from the pipe's actual endpoint elevations — always
+from the higher end toward the lower end — never from the drawing direction.
+
+1. Open the view and click **Drainage Flow Arrows**.
+2. Tick the piping systems that are the drainage ones (every system in the
+   view is listed with its pipe count).
+3. Pick the flow-arrow family type. Every loaded family whose name contains
+   *arrow* or *flow* is offered; if none exists, the tool says so and stops.
+4. A completion report shows pipes checked, sloped pipes, arrows created,
+   duplicates skipped, and each skipped/failed pipe with its reason.
+
+Short eligible pipes get one arrow at the midpoint; pipes longer than 15 m get
+one arrow per started 15 m, spread evenly and kept 1 m clear of the ends.
+Vertical pipes, level pipes and pipes under 1 m are skipped. An existing flow
+arrow within 0.3 m of a calculated spot suppresses the new one, so re-running
+the tool never doubles up — and one run is one undo step. Model families are
+rotated in plan **and** tilted to the pipe's true inclination; annotation
+families get the plan rotation.
+
+All the numbers live in the `CONFIG` block at the top of that tool's
+`script.py`; the geometry engine (`flowarrow_core.py`) is unit-tested outside
+Revit (`tests/test_flowarrow_core.py`).
 
 ### Level Adjustment
 
