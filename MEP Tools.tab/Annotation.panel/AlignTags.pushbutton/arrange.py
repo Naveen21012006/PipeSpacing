@@ -16,6 +16,13 @@ Resolution policy (user: "a well built automated version"):
     callback (its leaders re-derive from the new anchor), and the scan
     repeats until clean or the iteration cap is hit - remaining conflicts
     are reported, never silently ignored.
+  * A cluster may drift AT MOST about one text width from where the user
+    put it (user decision 2026-08-12: picks are deliberate and land on
+    the click to the millimetre - an uncapped chain of pushes dragged a
+    garage stack across the view on exit, stretching its leaders, since
+    the arrows stay pinned on the pipes while the text walks). A cluster
+    pushed past its cap SNAPS BACK to its original spot, is pinned, gets
+    ``capped=True``, and its conflict is left for the report.
 
 Pure Python (no Revit imports): the caller supplies, per cluster, an
 anchor, a text-block rectangle, leader segments, and a replan callback.
@@ -23,6 +30,8 @@ Rectangles are (lo_u, lo_v, hi_u, hi_v); segments are ((u, v), (u, v)).
 """
 
 from __future__ import division
+
+import math
 
 MAX_ITERATIONS = 60
 
@@ -158,8 +167,12 @@ def count_conflicts(states, margin):
     for i in range(count):
         for j in range(i + 1, count):
             a, b = states[i], states[j]
-            if not a.get('movable', True) and not b.get('movable', True):
-                continue   # pinned-vs-pinned: pre-existing, not counted
+            if (not a.get('movable', True) and not b.get('movable', True)
+                    and not (a.get('capped') or b.get('capped'))):
+                # Pinned-vs-pinned: pre-existing, not counted. A CAPPED
+                # cluster is pinned too, but its conflict is ours - the
+                # cap chose honesty over resolution, so report it.
+                continue
             if _rects_overlap(a['rect'], b['rect'], margin):
                 total += 1
             total += sum(1 for p, q in a['segments']
@@ -191,9 +204,19 @@ def resolve(states, replan, margin, max_iterations=MAX_ITERATIONS):
 
     Returns:
         (states, moved_indices, remaining_conflicts) - states mutated in
-        place with final anchors/geometry.
+        place with final anchors/geometry. A cluster whose pushes would
+        exceed its travel cap is reverted to its original state, pinned,
+        and flagged ``capped=True``; it never appears in moved_indices,
+        and its conflicts count as remaining.
     """
     moved = set()
+    originals = {}
+    # Travel cap: about one text width of drift, floored for degenerate
+    # rects so a failed measurement cannot make every push a revert.
+    caps = {}
+    for index, state in enumerate(states):
+        rect = state['rect']
+        caps[index] = max(rect[2] - rect[0], 4.0 * margin)
     for _ in range(max_iterations):
         conflict = _find_conflict(states, margin)
         if conflict is None:
@@ -205,8 +228,24 @@ def resolve(states, replan, margin, max_iterations=MAX_ITERATIONS):
             mover, push = i, (-push_for_j[0], -push_for_j[1])
         else:
             break   # both pinned: unresolvable, reported below
+        if mover not in originals:
+            originals[mover] = (states[mover]['anchor'],
+                                states[mover]['rect'],
+                                states[mover]['segments'])
         anchor_u, anchor_v = states[mover]['anchor']
         new_anchor = (anchor_u + push[0], anchor_v + push[1])
+        home = originals[mover][0]
+        drift = math.hypot(new_anchor[0] - home[0], new_anchor[1] - home[1])
+        if drift > caps[mover]:
+            # The user's pick is deliberate: snap back, pin, report.
+            home_anchor, home_rect, home_segments = originals[mover]
+            states[mover]['anchor'] = home_anchor
+            states[mover]['rect'] = home_rect
+            states[mover]['segments'] = home_segments
+            states[mover]['movable'] = False
+            states[mover]['capped'] = True
+            moved.discard(mover)
+            continue
         fresh = replan(mover, new_anchor)
         states[mover]['anchor'] = new_anchor
         states[mover]['rect'] = fresh['rect']

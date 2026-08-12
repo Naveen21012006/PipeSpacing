@@ -1186,11 +1186,16 @@ def final_arrangement(records, config, basis):
     states.extend(_view_obstacles(basis, exclude))
 
     states, moved, remaining = arrange.resolve(states, replan, margin)
+    held = sum(1 for state in states if state.get('capped'))
+    if held:
+        file_log.info('Final arrangement: %s cluster(s) held at their '
+                      'picks (travel cap).', held)
     if not moved:
-        if remaining:
+        if held or remaining:
             output.print_md(
-                ':information_source: Final arrangement: {0} conflict(s) '
-                'could not be auto-resolved.'.format(remaining))
+                ':information_source: Final arrangement: {0} cluster(s) '
+                'held at their picks (travel cap); {1} conflict(s) left '
+                'for manual adjustment.'.format(held, remaining))
         return
 
     group = TransactionGroup(doc, TITLE + ' - final arrangement')
@@ -1204,14 +1209,17 @@ def final_arrangement(records, config, basis):
     except Exception:
         group.RollBack()
         raise
-    note = '' if not remaining else \
-        '; {0} conflict(s) remain - adjust manually'.format(remaining)
+    note = ''
+    if held:
+        note += '; {0} held at their picks (travel cap)'.format(held)
+    if remaining:
+        note += '; {0} conflict(s) remain - adjust manually'.format(remaining)
     output.print_md(
         ':sparkles: Final arrangement: moved {0} cluster(s) to resolve '
         'overlaps{1}. One Ctrl+Z reverts the whole cleanup.'.format(
             len(moved), note))
-    file_log.info('Final arrangement: moved %s cluster(s); %s remaining.',
-                  len(moved), remaining)
+    file_log.info('Final arrangement: moved %s cluster(s); %s held; '
+                  '%s remaining.', len(moved), held, remaining)
 
 
 def _learn_keys(wrapper):

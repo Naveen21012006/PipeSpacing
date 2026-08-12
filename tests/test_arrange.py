@@ -27,6 +27,35 @@ def _replan_factory(dims):
     return replan
 
 
+def test_travel_cap_reverts_runaway_cluster():
+    # User decision 2026-08-12: picks are deliberate - the cleanup may
+    # drift a cluster about one text width, never drag it across the
+    # view (the garage stack: exit pass stretched its leaders because
+    # arrows stay pinned while the text walks). Escaping this pinned
+    # obstacle needs a 26-unit push against a cap of one text width
+    # (10): the cluster snaps back to the pick, is flagged, and the
+    # conflict is honestly reported instead of "resolved" far away.
+    states = [_state((0.0, 0.0), 100.0, 50.0, movable=False),
+              _state((40.0, 20.0), 10.0, 5.0)]
+    _, moved, remaining = arrange.resolve(
+        states, _replan_factory({0: (100.0, 50.0), 1: (10.0, 5.0)}), 1.0)
+    assert moved == []
+    assert states[1]['anchor'] == (40.0, 20.0)      # back on the pick
+    assert states[1]['capped'] is True
+    assert remaining >= 1                           # not swept under the rug
+
+
+def test_travel_cap_spares_ordinary_moves():
+    # A push well inside one text width behaves exactly as before.
+    states = [_state((0.0, 0.0), 10.0, 6.0),
+              _state((4.0, 2.0), 10.0, 6.0)]
+    _, moved, remaining = arrange.resolve(
+        states, _replan_factory({0: (10.0, 6.0), 1: (10.0, 6.0)}), 1.0)
+    assert moved == [1]
+    assert remaining == 0
+    assert not any(state.get('capped') for state in states)
+
+
 def test_no_conflicts_no_moves():
     states = [_state((0.0, 0.0), 10.0, 5.0),
               _state((50.0, 0.0), 10.0, 5.0)]
@@ -105,8 +134,12 @@ def test_leader_through_stack_pushes_stack_clear():
 
 
 def test_crossing_leaders_separate():
-    # Two clusters whose leaders cross: the later one is nudged until the
-    # crossing disappears (its segments move with its anchor).
+    # Two clusters whose leaders cross. The later one yields first, but
+    # clearing THIS crossing takes ~30 units of drift - nearly four text
+    # widths, the exact "stretched across the view on exit" failure the
+    # travel cap exists for (2026-08-12). So the later cluster snaps
+    # back to its pick, and the EARLIER one clears the crossing with a
+    # single small step inside its own cap instead.
     def replan(index, anchor):
         # Cluster 1's leader runs from its anchor to a fixed arrow.
         seg = [((anchor[0], anchor[1]), (40.0, anchor[1] + 30.0))]
@@ -119,8 +152,14 @@ def test_crossing_leaders_separate():
         dict(replan(1, (0.0, 0.0)), anchor=(0.0, 0.0), movable=True),
     ]
     _, moved, remaining = arrange.resolve(states, replan, 1.0)
-    assert moved == [1]
     assert remaining == 0
+    assert states[1]['capped'] is True
+    assert states[1]['anchor'] == (0.0, 0.0)     # back on its pick
+    assert moved == [0]
+    # The earlier cluster helped out, but stayed within its own cap.
+    drift = ((states[0]['anchor'][0] - 0.0) ** 2
+             + (states[0]['anchor'][1] - 10.0) ** 2) ** 0.5
+    assert drift <= 8.0
 
 
 def test_chain_of_overlaps_converges():
