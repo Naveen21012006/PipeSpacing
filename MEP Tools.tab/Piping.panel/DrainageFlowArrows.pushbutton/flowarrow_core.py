@@ -32,11 +32,15 @@ TOO_SHORT = 'too_short'
 VERTICAL = 'vertical'
 FLAT = 'flat'
 
+# Sides for tag-based arrow families with a Left and a Right type.
+LEFT = 'left'
+RIGHT = 'right'
+
 # Default rules (millimetres / degrees). script.py copies these into its
 # CONFIGURATION block; tests use them directly.
 DEFAULTS = {
     'min_pipe_length_mm': 1000.0,      # ignore pipes shorter than this
-    'multi_arrow_threshold_mm': 15000.0,  # longer pipes get several arrows
+    'multi_arrow_threshold_mm': 10000.0,  # one arrow per started 10 m
     'end_clearance_mm': 1000.0,        # keep arrows this far from the ends
     'duplicate_tolerance_mm': 300.0,   # existing arrow within this = skip
     'min_elevation_diff_mm': 5.0,      # smaller rise/fall counts as flat
@@ -196,3 +200,25 @@ def tilt_angle(direction):
     """
     horizontal = math.hypot(direction[0], direction[1])
     return math.atan2(-direction[2], horizontal)
+
+
+# ---------------------------------------------------------------------------
+# Left/right side for tag-based arrow families
+# ---------------------------------------------------------------------------
+def arrow_side(flow_dx, flow_dy, eps=1e-9):
+    """Return which type of a Left/Right tag pair points down the flow.
+
+    A pipe tag that rotates with its pipe is drawn along the pipe in
+    Revit's readable orientation: never upside down, and bottom-to-top
+    when the pipe runs vertically on screen. So the 'Right' type's head
+    points toward the readable end. Given the flow direction projected
+    into the view (flow_dx toward the view's right, flow_dy toward its
+    up), the flow matches the readable end - RIGHT - when it points
+    rightward, or straight up for a vertical run; otherwise the flipped
+    type - LEFT - is the one whose head points downhill.
+    """
+    if flow_dx > eps:
+        return RIGHT
+    if flow_dx < -eps:
+        return LEFT
+    return RIGHT if flow_dy > 0.0 else LEFT

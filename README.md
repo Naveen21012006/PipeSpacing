@@ -113,13 +113,21 @@ from the higher end toward the lower end — never from the drawing direction.
 4. A completion report shows pipes checked, sloped pipes, arrows created,
    duplicates skipped, and each skipped/failed pipe with its reason.
 
-Short eligible pipes get one arrow at the midpoint; pipes longer than 15 m get
-one arrow per started 15 m, spread evenly and kept 1 m clear of the ends.
+Short eligible pipes get one arrow at the midpoint; pipes longer than 10 m get
+one arrow per started 10 m (12 m → two, 25 m → three), spread evenly and kept
+1 m clear of the ends.
 Vertical pipes, level pipes and pipes under 1 m are skipped. An existing flow
 arrow within 0.3 m of a calculated spot suppresses the new one, so re-running
 the tool never doubles up — and one run is one undo step. Model families are
 rotated in plan **and** tilted to the pipe's true inclination; annotation
 families get the plan rotation.
+
+A **Pipe Tag** arrow family (e.g. `MEP-Tag-Pipe Flow Arrow` with its *Flow
+Left* / *Flow Right* types) is handled as a tag instead of a free instance:
+the tag aligns itself to the pipe, and the tool picks the Left or Right type
+per pipe so the head points downhill — flow falling toward the view's right
+gets the Right type, toward the left gets the Left type. If a family names
+its heads the other way round, flip `SWAP_LEFT_RIGHT` in the config.
 
 All the numbers live in the `CONFIG` block at the top of that tool's
 `script.py`; the geometry engine (`flowarrow_core.py`) is unit-tested outside

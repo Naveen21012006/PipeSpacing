@@ -78,12 +78,16 @@ def test_short_pipe_gets_one_midpoint_arrow():
 
 
 def test_threshold_pipe_still_gets_one_arrow():
-    assert core.arrow_stations(15000.0, CFG) == [7500.0]
+    assert core.arrow_stations(10000.0, CFG) == [5000.0]
+
+
+def test_just_over_threshold_gets_two_arrows():
+    assert len(core.arrow_stations(12000.0, CFG)) == 2
 
 
 def test_long_pipe_gets_one_arrow_per_started_threshold():
     stations = core.arrow_stations(40000.0, CFG)
-    assert len(stations) == 3  # ceil(40 / 15)
+    assert len(stations) == 4  # ceil(40 / 10)
 
 
 def test_long_pipe_stations_respect_end_clearance():
@@ -149,3 +153,26 @@ def test_tilt_angle_is_positive_downhill():
 
 def test_tilt_angle_is_zero_for_level_direction():
     assert core.tilt_angle((1.0, 0.0, 0.0)) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Left/right side for tag-based arrow families
+# ---------------------------------------------------------------------------
+def test_flow_to_screen_right_uses_right_type():
+    assert core.arrow_side(1.0, 0.0) == core.RIGHT
+
+
+def test_flow_to_screen_left_uses_left_type():
+    assert core.arrow_side(-1.0, 0.0) == core.LEFT
+
+
+def test_diagonal_flow_follows_its_horizontal_component():
+    assert core.arrow_side(0.7, -0.7) == core.RIGHT
+    assert core.arrow_side(-0.7, 0.7) == core.LEFT
+
+
+def test_vertical_screen_flow_reads_bottom_to_top():
+    # Revit draws a vertical pipe's tag reading bottom-to-top, so upward
+    # flow matches the readable (Right) head and downward flips to Left.
+    assert core.arrow_side(0.0, 1.0) == core.RIGHT
+    assert core.arrow_side(0.0, -1.0) == core.LEFT

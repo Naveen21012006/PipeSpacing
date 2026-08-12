@@ -16,6 +16,12 @@ Per pipe the tool:
     * places the chosen family and rotates it along the pipe: plan
       rotation always, plus the true downhill tilt for model families.
 
+Two kinds of arrow family are supported. A model / generic-annotation
+family is placed free and rotated to the flow. A Pipe Tag family (e.g.
+MEP-Tag-Pipe Flow Arrow with its Flow Left / Flow Right types) is placed
+as a pipe tag instead: the tag aligns itself to the pipe, and the tool
+picks the Left or Right type per pipe so the head points downhill.
+
 All geometry decisions live in flowarrow_core.py (pure, unit-tested
 outside Revit); this file is the Revit glue - collection, selection UI,
 family placement, transaction and report. All rules sit in the
@@ -43,7 +49,10 @@ from Autodesk.Revit.DB import (
     FamilyPlacementType,
     FamilySymbol,
     FilteredElementCollector,
+    IndependentTag,
     Line,
+    Reference,
+    TagOrientation,
     Transaction,
     XYZ,
 )
@@ -67,7 +76,7 @@ TITLE = 'Drainage Flow Arrows'
 # flowarrow_core.DEFAULTS so the numbers are visible and editable here.
 CONFIG = {
     'min_pipe_length_mm': 1000.0,      # ignore pipes shorter than this
-    'multi_arrow_threshold_mm': 15000.0,  # longer pipes get several arrows
+    'multi_arrow_threshold_mm': 10000.0,  # one arrow per started 10 m
     'end_clearance_mm': 1000.0,        # keep arrows this far from the ends
     'duplicate_tolerance_mm': 300.0,   # existing arrow within this = skip
     'min_elevation_diff_mm': 5.0,      # smaller rise/fall counts as flat
@@ -83,6 +92,22 @@ ARROW_NAME_KEYWORDS = ('arrow', 'flow')
 # Tilt model-family arrows to the pipe's true inclination (plan rotation
 # is always applied). View-based annotation families cannot tilt.
 TILT_ARROWS_TO_SLOPE = True
+
+# Tag-based arrow families carry a Left and a Right type (e.g.
+# MEP-Tag-Pipe Flow Arrow : Flow Left / Flow Right). The pair is found by
+# these words in the type names (compared lower-cased), and the tool
+# picks the side per pipe: flow falling toward the view's right gets the
+# Right type, toward the left gets the Left type (straight-up screen flow
+# reads bottom-to-top, so it counts as Right). If a project's family
+# names the heads the other way round, set SWAP_LEFT_RIGHT to True.
+LEFT_TYPE_KEYWORD = 'left'
+RIGHT_TYPE_KEYWORD = 'right'
+SWAP_LEFT_RIGHT = False
+
+# A tag anchors by its head point, which in some families is not the
+# centre of the drawn arrow. When True, every placed tag is nudged so the
+# centre of its drawn graphics sits exactly on the pipe point.
+CENTER_TAG_GRAPHICS = True
 # ===========================================================================
 
 
@@ -277,13 +302,56 @@ def _candidate_family_ids(symbols):
     return ids
 
 
+def is_pipe_tag_symbol(symbol):
+    """True when the symbol belongs to a Pipe Tag family.
+
+    Pipe tags cannot be placed as free instances - they need
+    IndependentTag.Create with the pipe as the host - so they switch the
+    tool into tag mode.
+    """
+    try:
+        category = symbol.Family.FamilyCategory
+        return (category is not None and
+                _eid(category.Id) == int(BuiltInCategory.OST_PipeTags))
+    except Exception:
+        return False
+
+
+def resolve_left_right_types(symbol):
+    """Return the (left, right) tag types of the chosen arrow family.
+
+    The pair is matched by LEFT_TYPE_KEYWORD / RIGHT_TYPE_KEYWORD in the
+    type names. A side with no matching type comes back as None and the
+    chosen type stands in for it.
+    """
+    left = right = None
+    for type_id in symbol.Family.GetFamilySymbolIds():
+        sibling = doc.GetElement(type_id)
+        name = (_element_name(sibling) or '').lower()
+        if RIGHT_TYPE_KEYWORD in name:
+            right = sibling
+        elif LEFT_TYPE_KEYWORD in name:
+            left = sibling
+    if SWAP_LEFT_RIGHT:
+        left, right = right, left
+    return left, right
+
+
 def collect_existing_arrow_points(symbols, chosen_symbol, view):
     """Return the locations (mm tuples) of existing flow-arrow instances.
 
     Instances of ANY candidate arrow family count, so re-running with a
-    different type still detects the arrows already placed. A view-based
-    annotation family only exists per view, so detection is scoped to the
-    active view for those; model families are checked document-wide.
+    different type still detects the arrows already placed. View-specific
+    arrows (annotation families and pipe tags) only exist per view, so
+    those are scoped to the active view; model families are checked
+    document-wide.
+
+    Returns:
+        dict: {'model': [3D mm points], 'plan': [mm points with z=0]}.
+        Tags and annotations sit on the view plane while pipes carry
+        their true elevation, so those are compared in plan only; model
+        arrows keep the full 3D comparison so stacked storeys never
+        block each other.
     """
     family_ids = _candidate_family_ids(symbols)
     view_based = (chosen_symbol.Family.FamilyPlacementType ==
@@ -294,20 +362,46 @@ def collect_existing_arrow_points(symbols, chosen_symbol, view):
         collector = FilteredElementCollector(doc)
     collector = collector.OfClass(FamilyInstance)
 
-    points = []
+    points = {'model': [], 'plan': []}
     for instance in collector:
         try:
             symbol = instance.Symbol
             if symbol is None or _eid(symbol.Family.Id) not in family_ids:
                 continue
-            location = instance.Location
-            point = getattr(location, 'Point', None)
-            if point is not None:
-                points.append(_xyz_to_mm(point))
+            point = getattr(instance.Location, 'Point', None)
+            if point is None:
+                continue
+            mm = _xyz_to_mm(point)
+            if (symbol.Family.FamilyPlacementType ==
+                    FamilyPlacementType.ViewBased):
+                points['plan'].append((mm[0], mm[1], 0.0))
+            else:
+                points['model'].append(mm)
         except Exception as ex:
             logger.debug('Existing-arrow scan skipped an instance: {}'
                          .format(ex))
-    logger.debug('Found {} existing arrow point(s).'.format(len(points)))
+
+    # Tag-based arrows are IndependentTags, not FamilyInstances. The
+    # drawn graphics (bounding box centre) say where the arrow is; the
+    # head position is only the anchor and may sit off the arrow.
+    tag_collector = (FilteredElementCollector(doc, view.Id)
+                     .OfClass(IndependentTag))
+    for tag in tag_collector:
+        try:
+            symbol = doc.GetElement(tag.GetTypeId())
+            if symbol is None or _eid(symbol.Family.Id) not in family_ids:
+                continue
+            bbox = tag.get_BoundingBox(view)
+            if bbox is not None:
+                mm = _xyz_to_mm((bbox.Min + bbox.Max) * 0.5)
+            else:
+                mm = _xyz_to_mm(tag.TagHeadPosition)
+            points['plan'].append((mm[0], mm[1], 0.0))
+        except Exception as ex:
+            logger.debug('Existing-arrow scan skipped a tag: {}'.format(ex))
+
+    logger.debug('Found {} existing arrow point(s).'.format(
+        len(points['model']) + len(points['plan'])))
     return points
 
 
@@ -325,6 +419,36 @@ def place_arrow(symbol, point, view):
         return doc.Create.NewFamilyInstance(point, symbol, view)
     return doc.Create.NewFamilyInstance(
         point, symbol, StructuralType.NonStructural)
+
+
+def pick_tag_type(context, direction):
+    """Return the Left or Right tag type whose head points down the flow.
+
+    The flow vector is projected onto the view's right/up axes and
+    flowarrow_core.arrow_side() decides the side, matching how Revit
+    orients a rotates-with-component tag (readable, bottom-to-top when
+    vertical on screen). A missing side falls back to the chosen type.
+    """
+    view = context['view']
+    right, up = view.RightDirection, view.UpDirection
+    dx = (direction[0] * right.X + direction[1] * right.Y +
+          direction[2] * right.Z)
+    dy = direction[0] * up.X + direction[1] * up.Y + direction[2] * up.Z
+    side = core.arrow_side(dx, dy)
+    tag_type = context[side]
+    return tag_type if tag_type is not None else context['symbol']
+
+
+def place_arrow_tag(tag_type, pipe, point, view):
+    """Tag a pipe with the flow-arrow tag, head at the computed point.
+
+    The tag family aligns itself to the pipe (rotates with component),
+    so no rotation is applied here - the Left/Right type choice is what
+    points the head downhill.
+    """
+    return IndependentTag.Create(
+        doc, tag_type.Id, view.Id, Reference(pipe), False,
+        TagOrientation.Horizontal, point)
 
 
 def rotate_arrow(instance, point, direction, view_based):
@@ -384,9 +508,14 @@ _SKIP_REASONS = {
 }
 
 
-def process_pipe(pipe, symbol, view, view_based, existing_points, counts,
-                 skipped_details):
-    """Place the arrows for one pipe; returns nothing, updates the tallies."""
+def process_pipe(pipe, context, existing, counts, skipped_details):
+    """Place the arrows for one pipe; returns nothing, updates the tallies.
+
+    context carries the placement decisions made once in main():
+    'symbol', 'view', 'view_based', 'tag_mode', 'created_tags' and - in
+    tag mode - the core.LEFT / core.RIGHT tag types. existing is the
+    {'model', 'plan'} dict from collect_existing_arrow_points().
+    """
     endpoints = get_location_endpoints(pipe)
     if endpoints is None:
         counts['invalid'] += 1
@@ -404,16 +533,27 @@ def process_pipe(pipe, symbol, view, view_based, existing_points, counts,
     high, low = core.oriented_endpoints(start, end)
     direction = core.flow_direction(start, end)
     stations = core.arrow_stations(core.distance(high, low), CONFIG)
+    tolerance = CONFIG['duplicate_tolerance_mm']
 
     for point_mm in core.arrow_points(high, low, stations):
-        if core.is_near_existing(point_mm, existing_points,
-                                 CONFIG['duplicate_tolerance_mm']):
+        flat_mm = (point_mm[0], point_mm[1], 0.0)
+        if (core.is_near_existing(point_mm, existing['model'], tolerance) or
+                core.is_near_existing(flat_mm, existing['plan'], tolerance)):
             counts['existing'] += 1
             continue
         point = _mm_to_xyz(point_mm)
-        instance = place_arrow(symbol, point, view)
-        rotate_arrow(instance, point, direction, view_based)
-        existing_points.append(point_mm)
+        if context['tag_mode']:
+            tag_type = pick_tag_type(context, direction)
+            tag = place_arrow_tag(tag_type, pipe, point, context['view'])
+            context['created_tags'].append((tag, point))
+            existing['plan'].append(flat_mm)
+        else:
+            instance = place_arrow(context['symbol'], point, context['view'])
+            rotate_arrow(instance, point, direction, context['view_based'])
+            if context['view_based']:
+                existing['plan'].append(flat_mm)
+            else:
+                existing['model'].append(point_mm)
         counts['created'] += 1
 
 
@@ -480,11 +620,29 @@ def main():
     if symbol is None:
         logger.debug('Arrow type selection cancelled.')
         return
-    view_based = (symbol.Family.FamilyPlacementType ==
-                  FamilyPlacementType.ViewBased)
+
+    # A Pipe Tag family switches the tool into tag mode: the tag aligns
+    # itself to the pipe and the Left/Right type points the head downhill.
+    context = {
+        'symbol': symbol,
+        'view': view,
+        'view_based': (symbol.Family.FamilyPlacementType ==
+                       FamilyPlacementType.ViewBased),
+        'tag_mode': is_pipe_tag_symbol(symbol),
+        'created_tags': [],
+        core.LEFT: None,
+        core.RIGHT: None,
+    }
+    if context['tag_mode']:
+        left_type, right_type = resolve_left_right_types(symbol)
+        context[core.LEFT] = left_type
+        context[core.RIGHT] = right_type
+        if left_type is None or right_type is None:
+            logger.debug('Left/Right pair not resolved; using the chosen '
+                         'type for every arrow.')
 
     # Existing arrows anywhere near the work decide the duplicate skips.
-    existing_points = collect_existing_arrow_points(symbols, symbol, view)
+    existing = collect_existing_arrow_points(symbols, symbol, view)
 
     work_pipes = [pipe for label in selected_labels for pipe in present[label]]
     counts = {'checked': len(work_pipes), 'sloped': 0, 'created': 0,
@@ -496,17 +654,42 @@ def main():
     # fails is recorded and never stops the remaining pipes.
     with Transaction(doc, 'Drainage Flow Arrows') as trans:
         trans.Start()
-        if not symbol.IsActive:
-            symbol.Activate()
+        activated = False
+        for placed_type in (symbol, context[core.LEFT], context[core.RIGHT]):
+            if placed_type is not None and not placed_type.IsActive:
+                placed_type.Activate()
+                activated = True
+        if activated:
             doc.Regenerate()
         for pipe in work_pipes:
             try:
-                process_pipe(pipe, symbol, view, view_based, existing_points,
-                             counts, skipped_details)
+                process_pipe(pipe, context, existing, counts,
+                             skipped_details)
             except Exception as ex:
                 counts['failed'] += 1
                 failed_details.append((_eid(pipe.Id), str(ex)))
                 logger.debug('Pipe {} failed: {}'.format(_eid(pipe.Id), ex))
+
+        # A tag anchors by its head, which in this arrow family is not
+        # the centre of the drawn arrow - nudge each placed tag so its
+        # graphics sit exactly on the pipe point (in the view plane).
+        if (context['tag_mode'] and CENTER_TAG_GRAPHICS and
+                context['created_tags']):
+            doc.Regenerate()
+            view_dir = view.ViewDirection
+            for tag, target in context['created_tags']:
+                try:
+                    bbox = tag.get_BoundingBox(view)
+                    if bbox is None:
+                        continue
+                    centre = (bbox.Min + bbox.Max) * 0.5
+                    raw = target - centre
+                    offset = raw - view_dir.Multiply(raw.DotProduct(view_dir))
+                    if offset.GetLength() > 1e-6:
+                        ElementTransformUtils.MoveElement(
+                            doc, tag.Id, offset)
+                except Exception as ex:
+                    logger.debug('Tag centring skipped: {}'.format(ex))
         trans.Commit()
 
     generate_report(counts, skipped_details, failed_details)
