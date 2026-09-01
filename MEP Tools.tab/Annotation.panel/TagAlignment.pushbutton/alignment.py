@@ -819,7 +819,10 @@ class _ClusterReferenceLine(AlignmentStrategy):
                          + utils.project(arrow, right)) / 2.0
                 elbow = utils.shift(
                     head, right, mid_u - utils.project(head, right))
-                plan.append((tags[index], elbow, arrow))
+                # Pin the arrow: attached, Revit slides it to the pipe's END
+                # and the "straight" leader draws with a kink whenever the row
+                # sits mid-pipe (see leader_manager.apply_elbows).
+                plan.append((tags[index], elbow, arrow, True))
             else:  # 'horiz'
                 turn_across = spec[2]
                 elbow = utils.shift(
@@ -1645,7 +1648,17 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 deal = _redeal(block)
                 if deal is None:
                     continue
+                # Re-dealing swaps which tag owns which row, so a tag can land
+                # nearer its own pipe than the minimum drop allows - an arrow
+                # with no stem above it. Pipe order is not worth that, so the
+                # stub count is guarded exactly like the crossing count.
+                def _stubs_here():
+                    return sum(1 for i in block
+                               if abs(height_targets[i] - pipe_up[i])
+                               < min_drop - 1e-9)
+
                 before = _real_crossings()
+                before_stubs = _stubs_here()
                 keep = [(i, height_targets[i], drop_reach[i]) for i in block]
                 for index in block:
                     _unplace(index)
@@ -1665,7 +1678,8 @@ class _ClusterReferenceLine(AlignmentStrategy):
                            _dodge_pipes(index, row,
                                         min(max(want, lower), upper),
                                         lower, upper))
-                if spoiled or _real_crossings() > before:
+                if (spoiled or _real_crossings() > before
+                        or _stubs_here() > before_stubs):
                     for index in block:
                         _unplace(index)
                     for index, row, drop in keep:
@@ -1762,27 +1776,54 @@ class _ClusterReferenceLine(AlignmentStrategy):
         # that works. If none is clean it keeps the best it saw, so lifting can
         # never make the drawing worse than not lifting. The lattice does not
         # move, so a lifted column has the same rhythm as an unlifted one.
+        # A STUB DROP counts as a fault too. A 90-degree leader whose drop is
+        # shorter than the arrowhead draws as an arrow stuck to the elbow with
+        # no stem above it - the reader cannot see which way it points. The
+        # 2026-09-01 drawing ended with one such tag, 732mm of drop against an
+        # 863mm rule, because the lift stopped the moment crossings reached
+        # zero. Headroom fixes both, so the lift now looks for both: it climbs
+        # while EITHER a crossing or a stub remains, and scores crossings
+        # first (a crossing is a lie about what connects to what; a stub is
+        # only hard to read).
+        min_drop_rule = max(clear, config.AUTO_MIN_DROP_ROWS * pitch)
+
+        def _stubs(candidate):
+            """Drops too short to show a stem above the arrowhead."""
+            count = 0
+            for spec in candidate['specs']:
+                if spec[0] not in ('horiz', 'riser'):
+                    continue
+                index = spec[1]
+                row_v = candidate['height'].get(index)
+                if row_v is None:
+                    continue
+                if abs(row_v - pipe_up[index]) < min_drop_rule - 1e-9:
+                    count += 1
+            return count
+
         lift_rows = max(0, int(config.AUTO_CEILING_LIFT_ROWS))
         layout = _layout(line_top)
         crossings = _audit(layout)
-        audit_trail = [(0, len(crossings))]
+        audit_trail = [(0, len(crossings), _stubs(layout))]
         lifted = 0.0
-        if crossings and lift_rows:
-            best = (len(crossings), 0, layout, crossings)
+        if (crossings or _stubs(layout)) and lift_rows:
+            best = ((len(crossings), _stubs(layout)), 0, layout, crossings)
             for step in range(1, lift_rows + 1):
                 trial = _layout(line_top + step * pitch)
                 found = _audit(trial)
-                audit_trail.append((step, len(found)))
-                if len(found) < best[0]:
-                    best = (len(found), step, trial, found)
-                if not found:
+                score = (len(found), _stubs(trial))
+                audit_trail.append((step, score[0], score[1]))
+                if score < best[0]:
+                    best = (score, step, trial, found)
+                if score == (0, 0):
                     break
             layout, crossings, lifted = best[2], best[3], best[1] * pitch
             if best[1]:
                 utils.logger.debug(
                     'Auto Tag: column lifted {0} row(s) above the drawn line '
-                    '- {1} crossing(s) instead of {2}.'.format(
-                        best[1], best[0], audit_trail[0][1]))
+                    '- {1} crossing(s) and {2} stub drop(s), from {3} and '
+                    '{4}.'.format(best[1], best[0][0], best[0][1],
+                                  audit_trail[0][1], audit_trail[0][2]))
         kinds = layout['kinds']
         height_targets = layout['height']
         drop_reach = layout['drop']

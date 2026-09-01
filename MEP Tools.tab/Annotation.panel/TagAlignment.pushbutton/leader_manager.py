@@ -154,10 +154,19 @@ class LeaderManager(object):
         follows the pipe. Free-end mode: also pin the arrow point, guaranteeing
         the clean L even if a Revit build won't slide the attached arrow.
 
+        An entry may DEMAND a free end regardless of the mode. A straight level
+        leader must meet its pipe at the tag's own row height, and attached is
+        exactly where that breaks: Revit slides the arrow to the pipe's end,
+        which is invisible when the row already sits at an end and a visible
+        kink when it does not - the 2026-09-01 drawing bent precisely the two
+        leaders whose rows fell mid-pipe. Straightness is the whole point of
+        that leader, so those pin their arrow.
+
         Args:
-            plan (list): (tag, elbow_point, arrow_point) tuples.
-            free_end (bool): True to pin the arrow (config.HORIZONTAL_LEADER_
-                FREE_END). False to leave it attached and elbow-driven.
+            plan (list): (tag, elbow, arrow) or (tag, elbow, arrow, free_end)
+                tuples; the fourth item forces a free end for that leader.
+            free_end (bool): True to pin every arrow (config.HORIZONTAL_LEADER_
+                FREE_END). False to leave them attached and elbow-driven.
 
         Returns:
             tuple: (updated, failures) where failures is a list of
@@ -166,14 +175,16 @@ class LeaderManager(object):
         updated = 0
         failures = []
 
-        for tag, elbow, arrow in plan:
+        for entry in plan:
+            tag, elbow, arrow = entry[0], entry[1], entry[2]
+            pinned = free_end or (len(entry) > 3 and entry[3])
             tag_id = utils.element_id_value(tag.Id)
             try:
                 if not tag.HasLeader:
                     tag.HasLeader = True
                 reference = _tagged_reference(tag)
 
-                if free_end:
+                if pinned:
                     try:
                         tag.LeaderEndCondition = LeaderEndCondition.Free
                     except Exception:
