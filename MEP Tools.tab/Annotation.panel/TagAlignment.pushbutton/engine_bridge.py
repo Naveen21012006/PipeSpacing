@@ -39,6 +39,8 @@ import json
 import os
 import sys
 
+import tool_config as config
+
 import utils
 
 # --- import the sibling engine + clusters, defensively --------------------
@@ -166,41 +168,133 @@ def load_settings():
         pass  # missing / corrupt -> the approved defaults
 
     local = load_local()
+    local_keys = []
     try:
         if 'vertical_mm' in local:
             values['vertical_mm'] = float(local['vertical_mm'])
+            local_keys.append('vertical_mm')
     except Exception:
         pass
     try:
         if 'gap_paper_mm' in local:
             values['gap_paper_mm'] = float(local['gap_paper_mm'])
+            local_keys.append('gap_paper_mm')
     except Exception:
         pass
+    values['_local_keys'] = tuple(local_keys)
     return values
 
 
-def row_pitch(bounds, view, settings):
+def text_height_from_type(tags, view):
+    """Return the DRAWN text height in model feet, or None.
+
+    Revit's bounding box for a tag is far taller than the glyphs it draws - on
+    this family it measured 4.75mm on paper where the text is 2.0mm, so the
+    pitch carried ~2.7mm of paper air that no gap setting could remove.
+
+    The true height is the label's TEXT SIZE x line count x view scale. Revit
+    keeps that size on the "Tag Label" sub-element inside the family, which a
+    placed tag does not expose, so config.AUTO_TEXT_SIZE_PAPER_MM states it;
+    a runtime lookup is still attempted first in case a family does expose it.
+    """
+    scale = float(getattr(view, 'Scale', 1) or 1)
+    factor = float(getattr(config, 'AUTO_TEXT_LINE_FACTOR', 1.35) or 1.0)
+
+    def _lines(tag):
+        try:
+            text = getattr(tag, 'TagText', '') or ''
+            return max(1, len(text.splitlines()))
+        except Exception:
+            return 1
+
+    # (a) the family, when it exposes the parameter at all
+    tallest = None
+    for tag in tags or []:
+        size_paper = None
+        try:
+            symbol = getattr(tag, 'Symbol', None)
+            if symbol is not None:
+                from Autodesk.Revit.DB import BuiltInParameter
+                parameter = symbol.get_Parameter(BuiltInParameter.TEXT_SIZE)
+                if parameter is None:
+                    parameter = symbol.LookupParameter('Text Size')
+                if parameter is not None:
+                    value = float(parameter.AsDouble())
+                    if value > 0:
+                        size_paper = value          # paper feet
+        except Exception:
+            size_paper = None
+        if size_paper is None:
+            continue
+        height = size_paper * factor * _lines(tag) * scale
+        if tallest is None or height > tallest:
+            tallest = height
+    if tallest is not None:
+        return tallest
+
+    # (b) the stated size - the reliable path for label-based tag families
+    stated = getattr(config, 'AUTO_TEXT_SIZE_PAPER_MM', None)
+    if stated:
+        size_paper = utils.mm_to_feet(float(stated))
+        lines = 1
+        for tag in tags or []:
+            lines = max(lines, _lines(tag))
+        return size_paper * factor * lines * scale
+    return None
+
+
+def row_pitch(bounds, view, settings, tags=None):
     """Return the centre-to-centre row pitch (model feet), per handoff s3.
 
-    Pitch = tallest DRAWN text height + the CLEAR GAP between texts. The gap
-    comes from Auto Tag's local ``gap_paper_mm`` when set - PAPER millimetres,
-    multiplied by the view scale, so "2 mm" reads as 2 mm on the printed sheet
-    at any scale. Without it, the shared Align Tags ``vertical_mm`` applies
-    with its original semantics (MODEL mm - at 1:100 a value of 100 is just
-    1 mm on paper, which is why the local control exists). When nothing could
-    be measured, a multi-line height estimate stands in so rows never overlap.
+    Pitch = drawn text height + the CLEAR GAP between texts.
+
+    The height comes from the tag TYPE's text size when it can be read (the
+    true printed height of the glyphs); the measured bounding box is only the
+    fallback, because Revit's box includes padding the drawing never shows.
+    The smaller of the two wins, so the pitch can never exceed what the old
+    measurement gave.
+
+    The gap comes from Auto Tag's local ``gap_paper_mm`` - PAPER millimetres
+    scaled by the view, so "0.5 mm" reads as 0.5 mm on the printed sheet at any
+    scale - defaulting to config.AUTO_DEFAULT_GAP_PAPER_MM. Setting the shared
+    Align Tags ``vertical_mm`` as a local override still works and keeps its
+    MODEL-mm meaning.
     """
     paper_gap = settings.get('gap_paper_mm')
-    if paper_gap is not None:
-        gap = utils.paper_mm_to_model(view, float(paper_gap))
-    else:
+    if paper_gap is None and 'vertical_mm' in settings.get('_local_keys', ()):
         gap = utils.mm_to_feet(float(settings.get('vertical_mm', 100.0)))
+    elif paper_gap is None:
+        gap = utils.paper_mm_to_model(view, config.AUTO_DEFAULT_GAP_PAPER_MM)
+    else:
+        gap = utils.paper_mm_to_model(view, float(paper_gap))
+
     heights = []
     for spans in bounds.values():
         span_v = spans[1] if spans else None
         if span_v:
             heights.append(span_v[1] - span_v[0])
-    text_height = max(heights) if heights else utils.paper_mm_to_model(view, 6.0)
+    measured = max(heights) if heights else None
+
+    typed = None
+    if config.AUTO_TEXT_HEIGHT_FROM_TYPE:
+        typed = text_height_from_type(tags, view)
+
+    if typed is not None and measured is not None:
+        text_height = min(typed, measured)
+        source = 'type' if typed <= measured else 'measured'
+    elif typed is not None:
+        text_height, source = typed, 'type'
+    elif measured is not None:
+        text_height, source = measured, 'measured'
+    else:
+        text_height = utils.paper_mm_to_model(view, 6.0)
+        source = 'estimate'
+    try:
+        settings['_text_height'] = text_height
+        settings['_text_height_source'] = source
+        settings['_default_gap_paper_mm'] = config.AUTO_DEFAULT_GAP_PAPER_MM
+    except Exception:
+        pass
     return text_height + gap
 
 

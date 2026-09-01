@@ -4,10 +4,10 @@
 Each alignment method is a small strategy class registered in
 ALIGNMENT_STRATEGIES. Adding one means writing a class and registering it.
 
-The live menu is the two Cluster-on-Reference-Line methods: one tag per run,
-clustered on a line you draw and centred on each group's pipes. Earlier
-strategies (edge alignment, distribution, plain/stack columns) have been
-retired to archive.py, unregistered.
+The live menu is a single method: Auto Tag Pipes. Earlier strategies (the
+Cluster-on-Reference-Line pair, Cluster Risers by Flow, edge alignment,
+distribution, plain/stack columns) are retired - the last three in
+archive.py, unregistered.
 
 Principles shared by all of them:
 
@@ -164,6 +164,76 @@ def _readable_pitch(bounds, view, axis_index, floor_mm=config.MIN_TAG_PITCH_MM):
 
     gap = utils.paper_mm_to_model(view, config.TAG_GAP_MM)
     return max(max(sizes) + gap, floor)
+
+
+def _seat_level_rows(members, elements, up, pitch, clear, pipe_across, snap):
+    """Give each vertical run a straight-leader row ON ITS OWN pipe.
+
+    A straight leader is a level line from the column into the pipe's side, so
+    tag i's row has to lie within pipe i's own extent - and nothing more. The
+    rows are still one pitch apart and still read leftmost-pipe-on-top, but
+    pipes are no longer required to share a common band: a staggered bundle can
+    seat every tag even where no single height is inside all of them.
+
+    Greedy from the top: take the pipes in reading order, and give each the
+    highest lattice row that is inside its own span and at least a pitch below
+    the row above. A pipe whose span cannot host any such row is returned as
+    homeless, and the caller demotes THAT TAG ALONE to a 90-degree drop.
+
+    Args:
+        members (list[int]): the cluster's screen-vertical tag indices.
+        elements (list): tagged elements, indexed like members.
+        up: the view's up axis (for get_curve_span).
+        pitch, clear (float): row spacing and the inset from a pipe's ends.
+        pipe_across (list[float]): each pipe's u, for reading order.
+        snap (callable): value -> nearest lattice row.
+
+    Returns:
+        (seats, homeless, trace): {index: row_v}, [index] demoted, and a list of
+        (index, usable_low, usable_high, row_or_None) for the log - so a
+        demotion can be read off the file instead of inferred.
+    """
+    spans = {}
+    for index in members:
+        span = utils.get_curve_span(elements[index], up)
+        if span is None:
+            continue
+        low, high = span[0] + clear, span[1] - clear
+        if low <= high:
+            spans[index] = (low, high)
+
+    # Reading order: leftmost pipe on the top row (the Align Tags convention).
+    ordered = sorted(members, key=lambda i: (pipe_across[i], i))
+
+    seats = {}
+    homeless = []
+    trace = []
+    ceiling = None                  # lowest row used so far
+    for index in ordered:
+        span = spans.get(index)
+        if span is None:            # no usable extent - it cannot be level
+            homeless.append(index)
+            trace.append((index, None, None, None))
+            continue
+        low, high = span
+        top = high if ceiling is None else min(high, ceiling - pitch)
+        row = snap(top)
+        # Tolerance is essential, not cosmetic. When `top` is already ON the
+        # lattice (the usual case: ceiling - pitch), snap returns the same row,
+        # but the two values reach it by different arithmetic and can differ by
+        # ~1e-13 feet. A bare `row > top` then reads that dust as "rounded up"
+        # and drops a whole row - which on the user's 2026-08-04 bundle left an
+        # empty row, starved the two pipes below it, and demoted both to drops.
+        if row > top + pitch * 1e-6:
+            row -= pitch
+        if row < low - pitch * 1e-6:   # its own pipe cannot host a free row
+            homeless.append(index)
+            trace.append((index, low, high, None))
+            continue
+        seats[index] = row
+        trace.append((index, low, high, row))
+        ceiling = row
+    return seats, homeless, trace
 
 
 def _tag_element(tag, doc):
@@ -759,9 +829,13 @@ class _ClusterReferenceLine(AlignmentStrategy):
         line_top = max(utils.project(line.GetEndPoint(0), up),
                        utils.project(line.GetEndPoint(1), up))
 
+        def _snap_to(value):
+            """Nearest lattice row measured from the drawn line's top."""
+            return line_top - round((line_top - value) / pitch) * pitch
+
         # Spacing from the SHARED Align Tags settings file (handoff s1/s3).
         settings = engine_bridge.load_settings()
-        pitch = engine_bridge.row_pitch(bounds, view, settings)
+        pitch = engine_bridge.row_pitch(bounds, view, settings, tags)
         step = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_STEP_MM)
         clear = utils.paper_mm_to_model(view, config.HORIZONTAL_LEADER_CLEAR_MM)
 
@@ -870,33 +944,38 @@ class _ClusterReferenceLine(AlignmentStrategy):
             #       staircase proof depends on (a block inside its own band has
             #       some drops going down and some up, and those cut each other's
             #       landings - 17 crossings in the check that caught this).
-            # A vertical run only earns a straight leader if the whole block's rows
-            # fit INSIDE the pipes themselves. Short stubs cannot host a stack, and
-            # a "level" leader whose row runs off the end of its pipe gets clamped
-            # into a SLANT that cuts diagonally across every other leader (13
-            # crossings in the user's 2026-08-02 run, all traced to this). Those
-            # blocks become 90-degree drops instead, which is what a short stub
-            # wants anyway.
+            # A vertical run earns a straight leader when ITS OWN pipe can host
+            # ITS OWN row. The rule used to demand that every row fit inside the
+            # INTERSECTION of all the cluster's pipes, and demoted the whole
+            # cluster when it could not - so one short pipe vetoed straight
+            # leaders for its longer neighbours, and a 4-tag bundle needed
+            # 3*pitch of common overlap. On the user's 2026-08-04 drawing that
+            # turned a clean vertical bundle into four 90-degree drops landing
+            # inside 2.2mm of paper (arrowheads merged into one blob, one
+            # crossing, an uneven column). Tag i's leader only ever touches pipe
+            # i, so that is the only span that matters; anything that genuinely
+            # cannot be seated is demoted ALONE.
             blocks = []
-            overlaps = {}
+            level_rows_planned = {}     # index -> the row its own pipe can host
+            demoted_note = []           # (cluster size, kept, demoted) for the log
+            seat_trace = []             # (index, usable_lo, usable_hi, row) 
             for group in groups:
                 level_members = [i for i in group if kinds[i] == 'level']
                 drop_members = [i for i in group if kinds[i] != 'level']
                 if level_members:
-                    spans = [utils.get_curve_span(elements[i], up)
-                             for i in level_members]
-                    usable = [s for s in spans if s is not None]
-                    room = -1.0
-                    if len(usable) == len(level_members) and usable:
-                        low = max(s[0] for s in usable) + clear
-                        high = min(s[1] for s in usable) - clear
-                        room = high - low
-                        overlaps[id(level_members)] = (low, high)
-                    if room < (len(level_members) - 1) * pitch:
-                        for index in level_members:
-                            kinds[index] = 'horiz'
-                        drop_members = drop_members + level_members
-                        level_members = []
+                    seats, homeless, trace = _seat_level_rows(
+                        level_members, elements, up, pitch, clear, pipe_across,
+                        _snap_to)
+                    seat_trace.extend(trace)
+                    if homeless:
+                        demoted_note.append(
+                            (len(level_members), len(seats), len(homeless)))
+                    for index in homeless:
+                        kinds[index] = 'horiz'
+                    drop_members = drop_members + homeless
+                    level_members = [i for i in level_members
+                                     if i not in homeless]
+                    level_rows_planned.update(seats)
                 if level_members:
                     blocks.append((level_members, True))
                 if drop_members:
@@ -953,26 +1032,41 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 # each other - so this block needs no staircase and reads in plain
                 # drawing order instead: LEFTMOST pipe on the top row, the same
                 # convention Align Tags uses for a vertical bundle.
+                # Each row was already chosen to sit on ITS OWN pipe during the
+                # split, so use those seats verbatim - re-deriving a shared band
+                # here is what forced every row into the intersection.
+                planned = dict((i, level_rows_planned[i]) for i in members
+                               if i in level_rows_planned)
+                if len(planned) == len(members):
+                    shift = 0.0
+                    for _try in range(_SLOT_TRIES):
+                        rows = [planned[i] - shift for i in members]
+                        if _free(min(rows) - pitch / 2.0,
+                                 max(rows) + pitch / 2.0):
+                            break
+                        shift += pitch      # another block already sits here
+                    for index in sorted(members,
+                                        key=lambda i: -planned[i]):
+                        row = planned[index] - shift
+                        height_targets[index] = row
+                        drop_reach[index] = reach[index]
+                        block_of[index] = block_index
+                        order.append(index)
+                    lowest = min(planned[i] for i in members) - shift
+                    highest = max(planned[i] for i in members) - shift
+                    occupied.append((lowest - pitch / 2.0,
+                                     highest + pitch / 2.0))
+                    continue
+
+                # Fallback: no plan (span unreadable) - the old centred block.
                 local = sorted(members, key=lambda i: (pipe_across[i], -pipe_up[i]))
                 span_v = (len(local) - 1) * pitch
-                # Centre the rows in the pipes' SHARED extent, so every row lands on
-                # every pipe and each leader is truly level.
-                shared = overlaps.get(id(members))
-                if shared is not None:
-                    band = (shared[0] + shared[1]) / 2.0
-                else:
-                    band = sum(pipe_up[i] for i in members) / float(len(local))
-                top = band + span_v / 2.0
-                # Sit on the shared lattice when the pipes still cover every row;
-                # a straight leader must not be traded for tidy spacing.
-                snapped = _snap(top)
-                if shared is None or (snapped <= shared[1]
-                                      and snapped - span_v >= shared[0]):
-                    top = snapped
+                band = sum(pipe_up[i] for i in members) / float(len(local))
+                top = _snap(band + span_v / 2.0)
                 for _try in range(_SLOT_TRIES):
                     if _free(top - span_v, top):
                         break
-                    top -= pitch      # two level bands overlap: slide clear
+                    top -= pitch
                 _assign_level(local, top, block_index)
 
             # --- phase 2: the exact-geometry greedy (audit-verified winner) ---
@@ -990,6 +1084,34 @@ class _ClusterReferenceLine(AlignmentStrategy):
             # (user-sanctioned); the drawn line's top is a hard wall.
             level_rows = [(height_targets[i], reach[i]) for i in order]
             placed = []     # (index, row_v, drop, band_low, band_high)
+
+            # WHICH SIDE each horizontal cluster takes (user rule 2026-08-04:
+            # "the horizontal cluster can be pushed above or below based on
+            # the situation"). The verticals are already down and immovable,
+            # so each horizontal cluster looks at both sides of its own pipes
+            # and prefers the one whose drops would pass the FEWEST rows that
+            # are already placed. That is what stops a cluster's leaders from
+            # running the length of the vertical band - the long parallel
+            # lines that read as tangle even when nothing crosses.
+            side_pref = {}
+            if config.AUTO_CLUSTER_SIDE_BIAS_ROWS > 0:
+                settled = [height_targets[i] for i in order]
+                for group in groups:
+                    members = [i for i in group if kinds[i] != 'level']
+                    if not members:
+                        continue
+                    high = max(pipe_up[i] for i in members)
+                    low = min(pipe_up[i] for i in members)
+                    reachspan = (len(members) + 1) * pitch
+                    above = sum(1 for v in settled
+                                if high < v <= high + reachspan)
+                    below = sum(1 for v in settled
+                                if low - reachspan <= v < low)
+                    if above == below:
+                        continue                # no reason to prefer a side
+                    choice = 1.0 if above < below else -1.0
+                    for index in members:
+                        side_pref[index] = choice
 
             def _span_reach(index):
                 """The tag's allowed drop range along its own pipe (reach)."""
@@ -1069,13 +1191,21 @@ class _ClusterReferenceLine(AlignmentStrategy):
                         row - text_h / 2.0, row + text_h / 2.0)
                 return _ink_cache[key]
 
-            def _row_cost(row, base):
+            def _row_cost(row, base, index=None):
                 # Nearest to the pipe wins; rows above it pay one pitch, so
                 # the column prefers to grow downward; inked paper repels the
-                # text in proportion to how much already sits there.
+                # text in proportion to how much already sits there; and a row
+                # on the side its cluster did NOT choose pays a bias, so the
+                # cluster stays together on the quieter side without being
+                # forced there when the geometry says otherwise.
                 cost = abs(row - base) + (pitch if row > base else 0.0)
                 if ink_map is not None and ink_weight > 0.0:
                     cost += ink_weight * pitch * _row_ink(row)
+                wanted = side_pref.get(index, 0.0)
+                if wanted:
+                    on_side = 1.0 if row > base else -1.0
+                    if on_side != wanted:
+                        cost += config.AUTO_CLUSTER_SIDE_BIAS_ROWS * pitch
                 return cost
 
             def _candidate_rows(index, taken, near_limit=None):
@@ -1092,7 +1222,7 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 for k in range(1, _SLOT_TRIES):
                     rows.append(start - k * pitch)
                     rows.append(start + k * pitch)
-                rows.sort(key=lambda r: _row_cost(r, base))
+                rows.sort(key=lambda r: _row_cost(r, base, index))
                 for row in rows:
                     if row > line_top + 1e-9:
                         continue        # hard wall: never above the line
@@ -1242,7 +1372,7 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 for k in range(1, _SLOT_TRIES):
                     rows.append(start - k * pitch)
                     rows.append(start + k * pitch)
-                rows.sort(key=lambda r: _row_cost(r, base))
+                rows.sort(key=lambda r: _row_cost(r, base, index))
                 best_choice = None
                 tried = 0
                 for row in rows:
@@ -1264,7 +1394,8 @@ class _ClusterReferenceLine(AlignmentStrategy):
                             break
                         tried += 1
                         _place(index, row, drop)
-                        score = (_real_crossings(), _row_cost(row, base))
+                        score = (_real_crossings(),
+                                 _row_cost(row, base, index))
                         _unplace(index)
                         if best_choice is None or score < best_choice[0]:
                             best_choice = (score, row, drop)
@@ -1380,13 +1511,13 @@ class _ClusterReferenceLine(AlignmentStrategy):
                                                   - pipe_up[entry[0]]))
                 index = worst[0]
                 base = pipe_up[index]
-                current_cost = _row_cost(height_targets[index], base)
+                current_cost = _row_cost(height_targets[index], base, index)
                 taken = [value for i2, value in height_targets.items()
                          if i2 != index]
 
                 def _nearer_only(rows_iterable, limit_cost, pipe_v):
                     for row in rows_iterable:
-                        if _row_cost(row, pipe_v) >= limit_cost:
+                        if _row_cost(row, pipe_v, index) >= limit_cost:
                             return      # sorted: nothing nearer remains
                         yield row
 
@@ -1422,9 +1553,20 @@ class _ClusterReferenceLine(AlignmentStrategy):
                         arrow_v = pipe_up[index]
                     specs.append(('level', index, arrow_v))
 
+            spans_v = {}
+            spans_u = {}
+            for index in range(count):
+                span = utils.get_curve_span(elements[index], up)
+                if span is not None:
+                    spans_v[index] = span[1] - span[0]
+                span = utils.get_curve_span(elements[index], right)
+                if span is not None:
+                    spans_u[index] = span[1] - span[0]
             return {'kinds': kinds, 'height': height_targets,
                     'drop': drop_reach, 'order': order, 'specs': specs,
-                    'block_of': block_of}
+                    'block_of': block_of, 'spans_v': spans_v,
+                    'spans_u': spans_u, 'demoted': demoted_note,
+                    'seat_trace': seat_trace}
 
         # --- the audit: plot it, look for crossovers, rethink, correct ------
         # An arrangement can be locally right and still tangle where two
@@ -1483,14 +1625,17 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 view, settings, pitch, column_across, line_top, outward,
                 targets_below, tags, elements, kinds, pipe_up, pipe_across,
                 reach, drop_reach, height_targets, order, new_heads, plan,
-                right, up, audit_trail)
+                right, up, audit_trail, layout.get('spans_v'),
+                layout.get('spans_u'), layout.get('demoted'),
+                layout.get('seat_trace'))
         return moves
 
     @staticmethod
     def _log_run(view, settings, pitch, column_across, line_top, outward,
                  targets_below, tags, elements, kinds, pipe_up, pipe_across,
                  reach, drop_reach, height_targets, order, new_heads, plan,
-                 right, up, audit_trail=None):
+                 right, up, audit_trail=None, spans_v=None, spans_u=None,
+                 demoted=None, seat_trace=None):
         """Write the diagnostic log for this run (never fatal)."""
         try:
             index_of = {}
@@ -1512,39 +1657,13 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 view, settings, pitch, column_across, line_top, outward,
                 targets_below, tags, elements, kinds, pipe_up, pipe_across,
                 reach, drop_reach, height_targets, order, leaders,
-                audit_trail)
+                audit_trail, spans_v, spans_u, demoted, seat_trace)
             if crossings > 0:
                 utils.logger.warning(
                     'Auto Tag: {0} leader crossing(s) - see {1}'.format(
                         crossings, diagnostics.log_path()))
         except Exception as ex:
             utils.logger.debug('Auto Tag logging skipped: {0}'.format(ex))
-
-
-class ClusterReferenceLineLeft(_ClusterReferenceLine):
-    name = 'Cluster Left on Reference Line'
-    description = 'One tag per run; left edges on the line; clusters centred on their pipes.'
-    edge = EDGE_LOW
-
-
-class ClusterReferenceLineRight(_ClusterReferenceLine):
-    name = 'Cluster Right on Reference Line'
-    description = 'One tag per run; right edges on the line; clusters centred on their pipes.'
-    edge = EDGE_HIGH
-
-
-class ClusterRisersByFlow(_ClusterReferenceLine):
-    """Same clustering, but the two-pick riser flow + F/B / T/A designations.
-
-    Placement is identical to the Cluster methods (risers drop onto their
-    points, nested); this method additionally has script.py take the two
-    direction picks and write the designation onto each riser tag.
-    """
-    name = 'Cluster Risers by Flow'
-    description = ('Risers only: pick the down risers, then the up risers; '
-                   'each tag gets its F/B / T/A designation.')
-    edge = EDGE_LOW
-    assigns_riser_flow = True
 
 
 class AutoTagPipes(_ClusterReferenceLine):
@@ -1568,8 +1687,8 @@ class AutoTagPipes(_ClusterReferenceLine):
         geometry = self._gather_geometry(tags, view, context)
         if geometry is None:
             return []
-        # Risers-as-points only make sense looking straight down; in a section
-        # fall back to the single-mode dispatch the Cluster methods use.
+        # Risers-as-points only make sense looking straight down; in a
+        # section fall back to the single-mode dispatch.
         if not geometry['plan_view']:
             return self._dispatch(tags, view, context, geometry)
         return self._auto_moves(tags, view, context, geometry)
@@ -1583,15 +1702,14 @@ class AutoTagPipes(_ClusterReferenceLine):
 # AlignmentStrategy and are appended here. Nothing else changes.
 ALIGNMENT_STRATEGIES = OrderedDict()
 
-# One tag per connected same-size run, clustered on the reference line and
-# centred on each group's pipes - the whole live menu. Every other strategy
-# (Stack, axis alignment, distribution) has been retired to archive.py; import
-# and register one here to bring it back.
+# Auto Tag Pipes is the whole live menu (user decision 2026-08-04). The
+# Cluster Left/Right and Cluster Risers by Flow methods were retired with it:
+# the first two tagged any MEP category generically with no designations, and
+# the third wrote F/B / T/A into a tag parameter using a separate riser tag
+# family - the approach Auto Tag Pipes replaced by writing Comments. Earlier
+# strategies (stack, axis alignment, distribution) live in archive.py.
 for _strategy_class in (
         AutoTagPipes,
-        ClusterReferenceLineLeft,
-        ClusterReferenceLineRight,
-        ClusterRisersByFlow,
 ):
     ALIGNMENT_STRATEGIES[_strategy_class.name] = _strategy_class()
 

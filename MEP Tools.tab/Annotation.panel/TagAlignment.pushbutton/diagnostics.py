@@ -104,7 +104,8 @@ def find_crossings(leaders):
 def write_run(view, settings, pitch, column_u, line_top, outward,
               targets_below, tags, elements, kinds, pipe_up, pipe_across,
               reach, drop_reach, height_targets, order, leaders,
-              audit_trail=None):
+              audit_trail=None, spans_v=None, spans_u=None, demoted=None,
+              seat_trace=None):
     """Write one run's decisions, output and self-check. Never raises.
 
     Args:
@@ -149,10 +150,17 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
         add('view   {0}   scale 1:{1}'.format(view_name, scale))
         if settings.get('gap_paper_mm') is not None:
             gap_text = '{0}mm PAPER'.format(settings.get('gap_paper_mm'))
-        else:
+        elif 'vertical_mm' in settings.get('_local_keys', ()):
             gap_text = '{0}mm model'.format(settings.get('vertical_mm'))
+        else:
+            gap_text = '{0}mm PAPER (default)'.format(
+                settings.get('_default_gap_paper_mm', '?'))
         add('rule   pitch {0:.0f}mm   landing {1}mm   gap {2}'.format(
             _mm(pitch), settings.get('landing_mm'), gap_text))
+        height_source = settings.get('_text_height_source')
+        if height_source:
+            add('text   height {0:.0f}mm model ({1})'.format(
+                _mm(settings.get('_text_height', 0.0)), height_source))
         add('line   u={0:.0f}mm  top={1:.0f}mm   pipes are {2} of the column'
             .format(_mm(column_u), _mm(line_top),
                     'RIGHT' if outward > 0 else 'LEFT'))
@@ -167,18 +175,22 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
         add('')
         add('--- rows (mm, view axes; row 0 = top) ----------------')
         add('row  idx  element     kind    pipe_u   pipe_v    reach    drop_r'
-            '     row_v')
+            '     row_v   span_v   span_u')
         for row, index in enumerate(order):
             try:
                 element_id = utils.element_id_value(elements[index].Id)
             except Exception:
                 element_id = '?'
+            span_v = (spans_v or {}).get(index)
+            span_u = (spans_u or {}).get(index)
             add('{0:>3}  {1:>3}  {2:<10} {3:<6} {4:>8.0f} {5:>8.0f} {6:>8.0f}'
-                ' {7:>9.0f} {8:>9.0f}'.format(
+                ' {7:>9.0f} {8:>9.0f} {9:>8} {10:>8}'.format(
                     row, index, element_id, kinds.get(index, '?'),
                     _mm(pipe_across[index]), _mm(pipe_up[index]),
                     _mm(reach[index]), _mm(drop_reach.get(index, reach[index])),
-                    _mm(height_targets[index])))
+                    _mm(height_targets[index]),
+                    '-' if span_v is None else '{0:.0f}'.format(_mm(span_v)),
+                    '-' if span_u is None else '{0:.0f}'.format(_mm(span_u))))
 
         add('')
         add('--- leaders (mm) -------------------------------------')
@@ -193,6 +205,27 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
                 index, _pt(leader[0]), _pt(leader[1]), _pt(leader[2])))
 
         add('')
+        if seat_trace:
+            add('--- straight-leader seating (vertical runs) -----------')
+            add('idx   usable window (mm)        row        verdict')
+            for index, low, high, row in seat_trace:
+                if low is None:
+                    add('{0:>3}   (no readable extent)                    '
+                        'DEMOTED'.format(index))
+                elif row is None:
+                    add('{0:>3}   {1:>9.0f} .. {2:<9.0f}      -          '
+                        'DEMOTED (no free row on its own pipe)'.format(
+                            index, _mm(low), _mm(high)))
+                else:
+                    add('{0:>3}   {1:>9.0f} .. {2:<9.0f}  {3:>9.0f}  '
+                        'straight'.format(index, _mm(low), _mm(high),
+                                          _mm(row)))
+            add('')
+        if demoted:
+            for size, kept, lost in demoted:
+                add('  cluster of {0}: {1} kept straight, {2} demoted'.format(
+                    size, kept, lost))
+            add('')
         if audit_trail:
             add('--- audit passes -------------------------------------')
             for repairs, found in audit_trail:

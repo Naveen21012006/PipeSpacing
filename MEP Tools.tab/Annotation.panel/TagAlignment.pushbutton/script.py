@@ -90,17 +90,23 @@ def ask_tag_type(manager, category_value, category_name):
 
 
 def ask_alignment_method():
-    """Ask the user which alignment method to apply.
+    """Return the alignment method to apply, asking only when there is a choice.
 
     The options come from the alignment registry, so a newly registered
-    strategy appears here automatically.
+    strategy appears here automatically. With a single method registered - the
+    live state since the Cluster methods were retired - there is nothing to
+    ask, so the run starts one click sooner.
 
     Returns:
-        str | None: The chosen method name, or None if cancelled.
+        str | None: The method name, or None if cancelled / none registered.
     """
+    methods = alignment.available_methods()
+    if not methods:
+        return None
+    if len(methods) == 1:
+        return methods[0]
     return forms.CommandSwitchWindow.show(
-        alignment.available_methods(),
-        message='Choose alignment method:')
+        methods, message='Choose alignment method:')
 
 
 def pick_risers_by_flow():

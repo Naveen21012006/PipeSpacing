@@ -235,6 +235,35 @@ AUTO_AUDIT_PASSES = 6
 # column. 1.0 = one row (the approved default); 0 disables the rule.
 AUTO_MIN_DROP_ROWS = 1.0
 
+# Default clear gap between two texts, in PAPER millimetres (scale-true), used
+# when no Shift+click override is set (user's chosen value, 2026-08-04). A
+# true 0 would let a fractional measurement error touch the line above; the
+# Shift+click presets still reach down to 0.5mm and up to 5mm.
+AUTO_DEFAULT_GAP_PAPER_MM = 0.75
+
+# Take the drawn text height from the tag TYPE's text size rather than Revit's
+# bounding box. The box includes padding the drawing never shows - on the
+# user's family it measured 4.75mm on paper where the text is 2.5mm, so the
+# pitch carried ~2mm of paper air that no gap setting could remove. Set False
+# to fall back to the measured box.
+AUTO_TEXT_HEIGHT_FROM_TYPE = True
+
+# The tag label's TEXT SIZE in PAPER millimetres - the height of one printed
+# line. Revit keeps this on the "Tag Label" sub-element inside the family, and
+# that is NOT reachable from the placed tag at runtime (the 2026-08-04 log
+# proved it: "text height 1187mm model (measured)"), so it is stated here.
+# Read it off the tag's Type Properties > Text > Text Size. None = try the
+# runtime lookup and fall back to Revit's padded bounding box.
+AUTO_TEXT_SIZE_PAPER_MM = 2.0
+
+# Drawn line height as a multiple of that text size. "Text Size" is the
+# NOMINAL font size; the glyphs actually drawn are taller - a slashed diameter
+# symbol and the "/" in H/L reach above and below the nominal box - so a 2mm
+# font paints roughly 2.7mm of line. Taking the size at face value made the
+# rows collide (2026-08-04). Raise this if text still touches; lower it for a
+# tighter column.
+AUTO_TEXT_LINE_FACTOR = 1.35
+
 # Vision. Before placing, the Auto method exports the view (with its own tag
 # categories hidden) and rasterises it into an INK MAP - where the paper
 # already has dimensions, text, walls, unselected pipework. Row scoring then
@@ -248,6 +277,14 @@ AUTO_SNAPSHOT_ENABLED = True
 # same as being this many rows further from the pipe. 0 disables the ink term
 # while keeping the snapshots.
 AUTO_INK_WEIGHT_ROWS = 3.0
+
+# How strongly a horizontal cluster is held to the side it chose, in row
+# pitches. After the vertical clusters are placed (they always go first and
+# keep their straight leaders), each horizontal cluster picks the side of its
+# own pipes whose drops would pass the fewest already-placed rows - so its
+# leaders stay out of the vertical band instead of running its whole length.
+# This is a BIAS, not a wall: strong geometry can still win. 0 disables it.
+AUTO_CLUSTER_SIDE_BIAS_ROWS = 6.0
 
 
 # ---------------------------------------------------------------------------

@@ -3,16 +3,19 @@
 
 Sets Auto Tag's LOCAL text gap (vertical_mm), stored in
 %APPDATA%/CKR/autotag_settings.json ON TOP of the shared Align Tags value:
-row pitch = drawn text height + this gap. 'Use shared setting' clears the
+row pitch = drawn text height + this gap. 'Reset to default' clears the
 override so the Align Tags dialog drives the spacing again.
 
 Lives in its own module because pyRevit's Shift+click runs the bundle's
 config.py as a SCRIPT - both that script and script.py call in here.
 """
 
+import re
+
 from pyrevit import forms
 
 import engine_bridge
+import tool_config
 
 TITLE = 'Auto Tag - text spacing'
 
@@ -31,29 +34,30 @@ def ask_text_gap(confirm=False):
             float(local['gap_paper_mm']))
         default = '{:g}'.format(float(local['gap_paper_mm']))
     else:
-        shared = engine_bridge.load_settings().get('vertical_mm', 100.0)
-        current = '{:g} model mm (shared - scale-dependent)'.format(shared)
-        default = '2'
+        current = '{:g} mm on paper (default)'.format(
+            tool_config.AUTO_DEFAULT_GAP_PAPER_MM)
+        default = '{:g}'.format(tool_config.AUTO_DEFAULT_GAP_PAPER_MM)
 
     # PAPER millimetres: what you set is what the printed sheet shows, at any
     # view scale. (The old model-mm gap shrank by the scale factor - a 15 at
     # 1:100 was 0.15 mm on paper, which is why nothing seemed to change.)
-    presets = ['0.5 mm', '1 mm', '1.5 mm', '2 mm', '3 mm', '5 mm']
+    presets = ['Minimal (0.5 mm)', '0.75 mm (default)', '1 mm', '1.5 mm',
+               '2 mm', '3 mm', '5 mm']
     choice = forms.CommandSwitchWindow.show(
-        presets + ['Custom...', 'Use shared setting'],
+        presets + ['Custom...', 'Reset to default'],
         message='Gap between texts ON PAPER - now {}:'.format(current))
     if not choice:
         return
 
-    if choice == 'Use shared setting':
+    if choice == 'Reset to default':
         local.pop('gap_paper_mm', None)
         local.pop('vertical_mm', None)
         engine_bridge.save_local(local)
         if confirm:
-            shared = engine_bridge.load_settings().get('vertical_mm', 100.0)
             forms.alert(
-                'Override cleared - the shared Align Tags value '
-                '({:g} model mm) applies from the next run.'.format(shared),
+                'Override cleared - the default {:g} mm paper gap applies '
+                'from the next run.'.format(
+                    tool_config.AUTO_DEFAULT_GAP_PAPER_MM),
                 title=TITLE)
         return
 
@@ -72,7 +76,12 @@ def ask_text_gap(confirm=False):
                         title=TITLE)
             return
     else:
-        value = float(choice.split()[0])
+        # Take the first number in the label, so the wording around it is free
+        # to change ("Minimal (0.5 mm)", "0.75 mm (default)", "1.5 mm").
+        found = re.search(r'[0-9]*\.?[0-9]+', choice)
+        if not found:
+            return
+        value = float(found.group())
 
     local['gap_paper_mm'] = max(0.0, value)
     local.pop('vertical_mm', None)      # one knob, one meaning
