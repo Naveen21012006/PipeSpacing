@@ -21,6 +21,7 @@ Only tag heads are moved. MEP elements are never touched.
 """
 
 from collections import OrderedDict
+import math
 
 import tool_config as config
 import diagnostics
@@ -166,45 +167,13 @@ def _readable_pitch(bounds, view, axis_index, floor_mm=config.MIN_TAG_PITCH_MM):
     return max(max(sizes) + gap, floor)
 
 
-def _seat_level_rows(members, elements, up, pitch, clear, pipe_across, snap):
-    """Give each vertical run a straight-leader row ON ITS OWN pipe.
+def _seat_pass(ordered, spans, pitch, snap):
+    """One greedy top-down seating pass against ONE lattice. See _seat_level_rows.
 
-    A straight leader is a level line from the column into the pipe's side, so
-    tag i's row has to lie within pipe i's own extent - and nothing more. The
-    rows are still one pitch apart and still read leftmost-pipe-on-top, but
-    pipes are no longer required to share a common band: a staggered bundle can
-    seat every tag even where no single height is inside all of them.
-
-    Greedy from the top: take the pipes in reading order, and give each the
-    highest lattice row that is inside its own span and at least a pitch below
-    the row above. A pipe whose span cannot host any such row is returned as
-    homeless, and the caller demotes THAT TAG ALONE to a 90-degree drop.
-
-    Args:
-        members (list[int]): the cluster's screen-vertical tag indices.
-        elements (list): tagged elements, indexed like members.
-        up: the view's up axis (for get_curve_span).
-        pitch, clear (float): row spacing and the inset from a pipe's ends.
-        pipe_across (list[float]): each pipe's u, for reading order.
-        snap (callable): value -> nearest lattice row.
-
-    Returns:
-        (seats, homeless, trace): {index: row_v}, [index] demoted, and a list of
-        (index, usable_low, usable_high, row_or_None) for the log - so a
-        demotion can be read off the file instead of inferred.
+    Walks the pipes in reading order giving each the highest lattice row that is
+    inside its own span and at least a pitch below the row above.  Returns the
+    same (seats, homeless, trace) triple its caller does.
     """
-    spans = {}
-    for index in members:
-        span = utils.get_curve_span(elements[index], up)
-        if span is None:
-            continue
-        low, high = span[0] + clear, span[1] - clear
-        if low <= high:
-            spans[index] = (low, high)
-
-    # Reading order: leftmost pipe on the top row (the Align Tags convention).
-    ordered = sorted(members, key=lambda i: (pipe_across[i], i))
-
     seats = {}
     homeless = []
     trace = []
@@ -234,6 +203,81 @@ def _seat_level_rows(members, elements, up, pitch, clear, pipe_across, snap):
         trace.append((index, low, high, row))
         ceiling = row
     return seats, homeless, trace
+
+
+def _seat_level_rows(members, elements, up, pitch, clear, pipe_across, snap):
+    """Give each vertical run a straight-leader row ON ITS OWN pipe.
+
+    A straight leader is a level line from the column into the pipe's side, so
+    tag i's row has to lie within pipe i's own extent - and nothing more. The
+    rows are still one pitch apart and still read leftmost-pipe-on-top, but
+    pipes are no longer required to share a common band: a staggered bundle can
+    seat every tag even where no single height is inside all of them.
+
+    Seating is greedy from the top (see _seat_pass), run once against the shared
+    lattice and again against a floated one if the shared lattice strands a tag.
+    A pipe whose span cannot host a free row under the BEST of those phases is
+    returned as homeless, and the caller demotes THAT TAG ALONE to a 90-degree
+    drop.
+
+    Args:
+        members (list[int]): the cluster's screen-vertical tag indices.
+        elements (list): tagged elements, indexed like members.
+        up: the view's up axis (for get_curve_span).
+        pitch, clear (float): row spacing and the inset from a pipe's ends.
+        pipe_across (list[float]): each pipe's u, for reading order.
+        snap (callable): value -> nearest row on the SHARED lattice.
+
+    Returns:
+        (seats, homeless, trace): {index: row_v}, [index] demoted, and a list of
+        (index, usable_low, usable_high, row_or_None) for the log - so a
+        demotion can be read off the file instead of inferred.
+    """
+    spans = {}
+    for index in members:
+        span = utils.get_curve_span(elements[index], up)
+        if span is None:
+            continue
+        low, high = span[0] + clear, span[1] - clear
+        if low <= high:
+            spans[index] = (low, high)
+
+    # Reading order: leftmost pipe on the top row (the Align Tags convention).
+    ordered = sorted(members, key=lambda i: (pipe_across[i], i))
+
+    # The stack wants to sit on the SHARED lattice, so tags from different
+    # clusters line up across the drawing. But that lattice's phase comes from
+    # wherever the user happened to click the reference line, and a stack that
+    # misses a pipe's window by a fraction of a pitch loses a whole straight
+    # leader for no geometric reason at all - on the 2026-09-01 bundle four
+    # rows FIT inside the four pipes, and the click phase still stranded one.
+    #
+    # So: try the shared lattice first, and only if it strands a tag, float the
+    # stack - anchoring the top row on each pipe's window top in turn, which is
+    # where the extra seat comes from when it exists. The stack keeps its exact
+    # pitch in every case; only its phase moves, and only when moving it buys a
+    # straight leader that the shared lattice could not.
+    anchors = [None]
+    anchors.extend(sorted(set(high for (_low, high) in spans.values()),
+                          reverse=True))
+    best = None
+    for anchor in anchors:
+        if anchor is None:
+            snap_to_phase = snap
+            drift = 0.0
+        else:
+            def snap_to_phase(value, _a=anchor):
+                return _a - math.floor((_a - value) / pitch + 1e-9) * pitch
+            drift = abs(anchor - snap(anchor))
+        attempt = _seat_pass(ordered, spans, pitch, snap_to_phase)
+        # More tags seated wins outright; ties go to the stack that sits
+        # closest to the shared lattice, so we drift only as far as we must.
+        score = (len(attempt[0]), -drift)
+        if best is None or score > best[0]:
+            best = (score, attempt)
+        if not attempt[1]:          # nobody stranded - the lattice was fine
+            break
+    return best[1]
 
 
 def _tag_element(tag, doc):

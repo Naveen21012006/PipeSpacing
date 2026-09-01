@@ -326,7 +326,13 @@ TAG_INITIAL_OFFSET_MM = 10.0
 #
 # Both distances are paper (mm), scaled by the view scale.
 HORIZONTAL_LEADER_STEP_MM = 6.0    # fan spacing between drops that share a middle
-HORIZONTAL_LEADER_CLEAR_MM = 2.0   # keep the drop this far inside the pipe ends
+# This inset is charged TWICE against every pipe - once at each end - so it is
+# the dominant cost on short runs. At 2.0 it took 4 mm off pipes only 11 mm long
+# on the user's 2026-09-01 bundle, leaving room for three rows where four were
+# wanted, and the fourth tag lost its straight leader for no reason but this
+# constant. 0.5 keeps the arrow off the very end of the pipe while leaving short
+# runs enough window to seat a full stack.
+HORIZONTAL_LEADER_CLEAR_MM = 0.5   # keep the drop this far inside the pipe ends
 
 # Leader end condition for the horizontal L-leaders:
 #   False -> Attached: Revit slides the arrow along the pipe to sit under the
