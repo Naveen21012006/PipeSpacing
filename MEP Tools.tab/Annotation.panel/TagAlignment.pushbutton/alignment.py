@@ -1571,6 +1571,106 @@ class _ClusterReferenceLine(AlignmentStrategy):
                                  30):
                     break
 
+            # --- RE-DEAL: the drop block reads in its pipes' own order -------
+            # (user rule 2026-09-01: "the horizontal cluster is not following
+            # top to bottom rule".) The greedy picks each row by how near it
+            # sits to that tag's own pipe. For a PARALLEL BUNDLE - pipes a
+            # fraction of a pitch apart - that measure cannot tell them apart,
+            # so which tag lands on which row comes down to rounding, and the
+            # column reads in no order at all.
+            #
+            # So the block is re-dealt: the SAME rows, the same tags, but
+            # sorted by pipe height - top pipe on the top row - and the drops
+            # re-fanned along the pipes in the one order the staircase permits
+            # (a higher row must reach FARTHER, or its landing would meet the
+            # drop below it). The spread halves until every drop fits inside
+            # its own pipe's length, so a bundle with little shared run still
+            # separates as far as it can instead of stacking on one line.
+            #
+            # The checker has the last word: a re-deal is kept only if it
+            # crosses no more than the arrangement it replaces.
+            def _redeal(members):
+                """(index, row, drop) per member, in pipe order, or None."""
+                rows_free = sorted((height_targets[i] for i in members),
+                                   reverse=True)
+                ordered = sorted(members, key=lambda i: (-pipe_up[i], i))
+                windows = [_span_reach(i) for i in ordered]
+
+                def _fan(spread):
+                    """Drop reaches at this spacing, or None if they do not fit.
+
+                    Each drop takes the farthest point on its own pipe that is
+                    at least `spread` inside the one above it. Decreasing, so
+                    the higher row always reaches farther.
+                    """
+                    seats = []
+                    limit = None
+                    for low, high in windows:
+                        want = high if limit is None else min(high,
+                                                              limit - spread)
+                        if want < low - 1e-9:
+                            return None
+                        seats.append(want)
+                        limit = want
+                    return seats
+
+                # Widest spacing the pipes can actually carry, up to `step`.
+                # Bisected rather than halved: on the 2026-09-01 bundle
+                # halving settled for 375mm where 493mm fits, and every
+                # millimetre counts when four arrowheads share 6mm of paper.
+                best = _fan(0.0)
+                if best is None:
+                    return None
+                low_s, high_s = 0.0, step
+                if _fan(step) is not None:
+                    best = _fan(step)
+                else:
+                    for _try in range(20):
+                        middle = (low_s + high_s) / 2.0
+                        found = _fan(middle)
+                        if found is None:
+                            high_s = middle
+                        else:
+                            best, low_s = found, middle
+                return list(zip(ordered, rows_free, best))
+
+            for group in groups:
+                block = [i for i in group
+                         if kinds[i] == 'horiz' and i in height_targets]
+                if len(block) < 2:
+                    continue
+                by_row = sorted(block, key=lambda i: -height_targets[i])
+                if by_row == sorted(block, key=lambda i: (-pipe_up[i], i)):
+                    continue        # already reads top pipe first
+                deal = _redeal(block)
+                if deal is None:
+                    continue
+                before = _real_crossings()
+                keep = [(i, height_targets[i], drop_reach[i]) for i in block]
+                for index in block:
+                    _unplace(index)
+                # Re-place top row first, each drop CLAMPED by the same
+                # interval rule the greedy uses. The fan is only an aim: what
+                # the rest of the sheet allows still wins, which is what keeps
+                # a re-deal legal instead of merely tidy.
+                spoiled = False
+                for index, row, want in deal:
+                    lower, upper = _interval(index, row)
+                    low, high = _span_reach(index)
+                    lower, upper = max(lower, low), min(upper, high)
+                    if lower > upper + 1e-9:
+                        spoiled = True
+                        break
+                    _place(index, row,
+                           _dodge_pipes(index, row,
+                                        min(max(want, lower), upper),
+                                        lower, upper))
+                if spoiled or _real_crossings() > before:
+                    for index in block:
+                        _unplace(index)
+                    for index, row, drop in keep:
+                        _place(index, row, drop)
+
             # Leader specs, by what the target IS on screen:
             #   riser point            -> landing + drop onto the point
             #   run horizontal         -> landing + true 90-degree drop at its
