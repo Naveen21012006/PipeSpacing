@@ -297,8 +297,10 @@ def main():
             # maintain() so their elbows are not wiped.
             plan = context.get('leader_plan') or []
             engine_plan = context.get('engine_leader_plan') or []
-            managed = set(utils.element_id_value(tag.Id)
-                          for tag, _elbow, _arrow in plan + engine_plan)
+            # Plan entries are (tag, elbow, arrow) or (tag, elbow, arrow,
+            # free_end) - index rather than unpack, so a 4-tuple is fine.
+            managed = set(utils.element_id_value(entry[0].Id)
+                          for entry in plan + engine_plan)
 
             # Engine-planned leaders (the Auto method's horizontals) pin their
             # arrows exactly where the engine put them when the shared

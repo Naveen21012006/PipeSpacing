@@ -1861,7 +1861,9 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 index_of[utils.element_id_value(tag.Id)] = index
 
             leaders = {}
-            for tag, elbow, arrow in plan:
+            for entry in plan:
+                # entries are (tag, elbow, arrow) or (tag, elbow, arrow, free)
+                tag, elbow, arrow = entry[0], entry[1], entry[2]
                 index = index_of.get(utils.element_id_value(tag.Id))
                 head = new_heads.get(index) if index is not None else None
                 if head is None:
