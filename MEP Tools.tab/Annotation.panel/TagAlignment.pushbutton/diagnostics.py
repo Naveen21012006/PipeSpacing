@@ -228,9 +228,14 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
             add('')
         if audit_trail:
             add('--- audit passes -------------------------------------')
-            for repairs, found in audit_trail:
-                add('  {0} block(s) re-planned -> {1} crossing(s)'.format(
-                    repairs, found))
+            add('  the column may rise above the drawn line to clear a')
+            add('  crossing; the smallest lift that works is the one kept.')
+            best = min(found for _lift, found in audit_trail)
+            for lift, found in audit_trail:
+                add('  lift {0} row(s) -> {1} crossing(s){2}'.format(
+                    lift, found, '   <- kept' if found == best else ''))
+                if found == best:
+                    break
             add('')
         add('--- self-check ---------------------------------------')
         crossings = find_crossings(leaders)

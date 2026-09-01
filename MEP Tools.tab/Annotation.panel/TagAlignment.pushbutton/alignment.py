@@ -960,12 +960,17 @@ class _ClusterReferenceLine(AlignmentStrategy):
                               (utils.project(point, right),
                                utils.project(point, up)))
 
-        def _layout():
+        def _layout(ceiling):
             """Compute one complete arrangement (deterministic).
 
             Levels place first with straight leaders (unchanged priority);
             every other tag is seated by the exact-geometry greedy below, its
             own placement gated by the same crossing checker the log uses.
+
+            `ceiling` is the highest row a tag may take. It starts at the drawn
+            line and the caller raises it only when that removes crossings; the
+            row LATTICE stays anchored to the line either way, so a lifted
+            column keeps the same rhythm as an unlifted one.
             """
             kinds = dict(base_kinds)
 
@@ -1262,8 +1267,8 @@ class _ClusterReferenceLine(AlignmentStrategy):
                     rows.append(start + k * pitch)
                 rows.sort(key=lambda r: _row_cost(r, base, index))
                 for row in rows:
-                    if row > line_top + 1e-9:
-                        continue        # hard wall: never above the line
+                    if row > ceiling + 1e-9:
+                        continue        # never above the column's ceiling
                     if abs(row - base) < limit:
                         continue        # too close to read as a drop
                     if any(abs(row - t) < pitch - 1e-6 for t in taken):
@@ -1416,7 +1421,7 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 for row in rows:
                     if tried >= 120:
                         break
-                    if row > line_top + 1e-9 or abs(row - base) < clear:
+                    if row > ceiling + 1e-9 or abs(row - base) < clear:
                         continue
                     if any(abs(row - t) < pitch - 1e-6 for t in taken):
                         continue
@@ -1638,12 +1643,46 @@ class _ClusterReferenceLine(AlignmentStrategy):
                                       (arrow_u, spec[2]))
             return diagnostics.find_crossings(leaders)
 
-        # One deterministic pass: the layout gates every placement with the
-        # real crossing checker itself, so the old flip-and-retry audit loop
-        # is gone - _audit stays as the independent self-check for the log.
-        layout = _layout()
+        # One deterministic pass per ceiling: the layout gates every placement
+        # with the real crossing checker itself, so the old flip-and-retry
+        # audit loop is gone - _audit stays as the independent self-check.
+        #
+        # THE LIFT (user decision 2026-09-01). A 90-degree tag has to sit above
+        # its pipe for the arrow to point down at it. Where the drawn line
+        # leaves less headroom than the drop tags need, the ones that do not
+        # fit are pushed BELOW the straight-leader block, and from there every
+        # arrow must climb back through every straight leader - on the logged
+        # run of that date, a line 493mm above the pipes gave room for one tag
+        # of four and drew 9 crossings. Their pipes were too short to reach
+        # past the straight leaders' arrows, so no drop position existed that
+        # avoided it: the only cure is headroom.
+        #
+        # So the column may rise ABOVE the drawn line, one row at a time, and
+        # keeps the FIRST height that draws no crossings - the smallest lift
+        # that works. If none is clean it keeps the best it saw, so lifting can
+        # never make the drawing worse than not lifting. The lattice does not
+        # move, so a lifted column has the same rhythm as an unlifted one.
+        lift_rows = max(0, int(config.AUTO_CEILING_LIFT_ROWS))
+        layout = _layout(line_top)
         crossings = _audit(layout)
         audit_trail = [(0, len(crossings))]
+        lifted = 0.0
+        if crossings and lift_rows:
+            best = (len(crossings), 0, layout, crossings)
+            for step in range(1, lift_rows + 1):
+                trial = _layout(line_top + step * pitch)
+                found = _audit(trial)
+                audit_trail.append((step, len(found)))
+                if len(found) < best[0]:
+                    best = (len(found), step, trial, found)
+                if not found:
+                    break
+            layout, crossings, lifted = best[2], best[3], best[1] * pitch
+            if best[1]:
+                utils.logger.debug(
+                    'Auto Tag: column lifted {0} row(s) above the drawn line '
+                    '- {1} crossing(s) instead of {2}.'.format(
+                        best[1], best[0], audit_trail[0][1]))
         kinds = layout['kinds']
         height_targets = layout['height']
         drop_reach = layout['drop']

@@ -163,13 +163,25 @@ AUTO_BLOCK_GAP_MM = 6.0
 # tangled" into a named fault with coordinates. Set False to switch it off.
 AUTO_LOG_ENABLED = True
 
-# After working out an arrangement the Auto method AUDITS it: it runs the same
-# geometric crossing test the log publishes, and if any leader crosses another
-# it re-plans the block responsible on the other side of its pipes and scores
-# the whole drawing again, keeping the best arrangement it found. This is the
-# number of times it is allowed to change its mind. 1 disables the repair
-# (the audit still runs and still reports).
-AUTO_AUDIT_PASSES = 6
+# After working out an arrangement the Auto method AUDITS it against the same
+# geometric crossing test the log publishes. If any leader crosses another, the
+# column is allowed to rise ABOVE the drawn reference line, one row at a time,
+# and the FIRST height that draws no crossings is kept - the smallest lift that
+# works. If none is clean the best of them is kept, so lifting can never make
+# the drawing worse than not lifting.
+#
+# The lift exists because a 90-degree tag has to sit above its pipe for the
+# arrow to point down at it. Click the line too close above the pipework and
+# the drop tags that do not fit are pushed below the straight-leader block,
+# where every arrow must climb back through every straight leader: on the
+# 2026-09-01 run a line 493mm above the pipes held one drop tag of four and
+# drew 9 crossings, and no drop position could have avoided them - those pipes
+# were too short to reach past the straight leaders' arrows. Headroom was the
+# only cure, so the tool now finds it instead of reporting the damage.
+#
+# This is a count of ROW PITCHES. 0 restores the old hard wall (the column
+# never leaves the line, and crossings are reported instead of repaired).
+AUTO_CEILING_LIFT_ROWS = 8
 
 # Minimum VISIBLE length of a 90-degree leader's drop, in row-pitches. A tag
 # seated almost level with its own pipe draws a drop too short to read (the
