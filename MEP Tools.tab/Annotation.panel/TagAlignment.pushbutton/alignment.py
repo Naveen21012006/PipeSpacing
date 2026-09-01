@@ -324,13 +324,7 @@ class AlignmentStrategy(object):
     # every selected segment (script.py groups the runs before creating tags).
     groups_runs = False
 
-    # Set True to run the two-pick riser flow (down risers, then up risers) so
-    # each riser gets an F/B / T/A designation. Plain methods leave this False
-    # and tag with a single ordinary selection.
-    assigns_riser_flow = False
-
-    # Set True for the Auto method: tag the WHOLE selection (the two picks only
-    # set riser flow, they do not narrow the selection), write each pipe's
+    # Set True for the Auto method: tag the WHOLE selection, write each pipe's
     # designation into its Comments, and lay horizontals and risers out as two
     # blocks on the one reference line. script.py reads this flag.
     writes_comments = False
@@ -846,7 +840,7 @@ class _ClusterReferenceLine(AlignmentStrategy):
         """Lay the whole selection out as ONE SPREAD column on the line.
 
         The user-approved model (placement-plan artifact v3, 2026-08-02):
-        every tag - AT H/L horizontals and F/B risers alike - sits ON the
+        every tag - horizontals and risers alike - sits ON the
         drawn line, and the column SPREADS along it so each tag sits at its
         own pipe's band instead of bunching at the top (the bunching funnelled
         every leader through one corridor). Default rows: level with the pipe
@@ -1714,17 +1708,17 @@ class AutoTagPipes(_ClusterReferenceLine):
     """One selection, sorted automatically into horizontals and risers.
 
     The tool reads each pipe's direction: horizontals get AT H/L / AT L/L by
-    height, risers get F/B / T/A by flow (the two picks) and run extent. Every
-    pipe's designation is WRITTEN into its Comments, and one ordinary pipe tag
-    (Size + System Abbreviation + Comments) shows it - so there is no tag-type
-    switching. The two families lay out as two blocks on the one reference line
-    (horizontals above, risers below).
+    height and that designation is WRITTEN into the pipe's Comments, which one
+    ordinary pipe tag (Size + System Abbreviation + Comments) shows - so there
+    is no tag-type switching. Risers carry no designation (the flow prompt that
+    supplied it was removed 2026-09-01) but are still laid out as their own
+    block: the two families sit as two blocks on the one reference line,
+    horizontals above, risers below.
     """
     name = 'Auto Tag Pipes'
     description = ('One selection: sorts horizontals (H/L / L/L by height) from '
-                   'risers (F/B / T/A by flow) and writes each pipe\'s Comments.')
+                   'risers and writes each pipe\'s Comments.')
     edge = EDGE_LOW
-    assigns_riser_flow = True
     writes_comments = True
 
     def compute_moves(self, tags, view, context):

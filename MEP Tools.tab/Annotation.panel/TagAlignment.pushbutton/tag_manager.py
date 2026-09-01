@@ -19,7 +19,6 @@ from Autodesk.Revit.DB import (
 from Autodesk.Revit.DB.Plumbing import Pipe
 
 import tool_config as config
-import runs
 import utils
 
 
@@ -51,11 +50,6 @@ class TagManager(object):
         self.view = view
         self._tag_type_cache = {}          # tag category int -> ElementId
         self._elevation_cache = {}         # 'high'/'low' -> ElementId
-        self._riser_type_cache = {}        # 'riser' -> ElementId | None
-        self._riser_designations = {}      # pipe id -> designation | None
-        self._riser_up_ids = None          # picked up-flow pipe ids, or None
-        self._riser_down_ids = None        # picked down-flow pipe ids, or None
-        self._riser_param_warned = False   # warn once if the param is missing
         self._comments_mode = False        # Auto method: designation -> Comments
         self._existing = self._index_existing_tags()
         self._right, _up = utils.get_view_axes(view)
@@ -107,7 +101,7 @@ class TagManager(object):
 
         When on, the designation (F/B, AT H/L, ...) is WRITTEN into each pipe's
         built-in Comments parameter and one ordinary tag family shows it - so
-        the per-pipe tag-type switching (riser tag, HL/LL tag) is turned off and
+        the per-pipe tag-type switching (HL/LL tag) is turned off and
         every pipe uses the single chosen pipe tag. When off, the tool keeps its
         original tag-type + tag-parameter behaviour.
         """
@@ -146,15 +140,9 @@ class TagManager(object):
         if tag_category is None:
             return None
 
-        # Risers on a plan get a designation tag (T/A, F/B, ...), and
-        # water-supply pipes are typed per pipe by elevation (HL / LL) -
-        # neither is cached per category. The riser rule is the more specific
-        # one, so it goes first; everything else falls through to the normal
-        # one-type-per-category selection below.
-        riser_id = self._riser_tag_type_id(element, tag_category)
-        if riser_id is not None:
-            return riser_id
-
+        # Water-supply pipes are typed per pipe by elevation (HL / LL), so that
+        # rule is not cached per category; everything else falls through to the
+        # normal one-type-per-category selection below.
         elevation_id = self._elevation_tag_type_id(element, tag_category)
         if elevation_id is not None:
             return elevation_id
@@ -331,12 +319,12 @@ class TagManager(object):
         threshold = utils.mm_to_feet(config.ELEVATION_TAG_THRESHOLD_MM)
         return self._elevation_symbol_id(tag_category, height >= threshold)
 
-    # -- riser designation tags (plan views only) ---------------------------
+    # -- plan-view designations (AT H/L / AT L/L) ---------------------------
     def _plan_level_elevation(self):
         """Return the active plan view's level elevation (feet), or None.
 
-        None in sections/elevations/3D, which switches the riser rule off
-        there - vertical pipes in a section keep the normal tag flow.
+        None in sections/elevations/3D, which switches the designation rule off
+        there - pipes in a section keep the normal tag flow.
         """
         try:
             level = self.view.GenLevel
@@ -344,94 +332,12 @@ class TagManager(object):
         except Exception:
             return None
 
-    def set_riser_flow_elements(self, up_elements, down_elements):
-        """Record which risers the user picked as up-flow and down-flow.
-
-        The pipes clicked in the 'bottom to top' pick flow up; those in the
-        'top to bottom' pick flow down. Keyed by element id, so the run
-        representative (always one of the picked segments) resolves to the
-        right direction. Once this is set - even to empty sets - a vertical
-        pipe that was NOT picked as a riser gets no designation, so ordinary
-        pipes picked afterwards stay plain.
-        """
-        self._riser_up_ids = set(
-            utils.element_id_value(element.Id) for element in (up_elements or []))
-        self._riser_down_ids = set(
-            utils.element_id_value(element.Id) for element in (down_elements or []))
-        self._riser_designations = {}   # re-evaluate with the new flow
-
-    def _riser_flow(self, pipe):
-        """Return 'up' / 'down' for this riser, or None.
-
-        The direction is whichever pick the pipe was clicked in. A pipe in
-        neither pick is not a designated riser (None). Before the two-pick has
-        run at all (e.g. a section view), there is no flow either, so None.
-        """
-        if self._riser_up_ids is None:
-            return None
-
-        pipe_id = utils.element_id_value(pipe.Id)
-        if pipe_id in self._riser_up_ids:
-            return 'up'
-        if pipe_id in self._riser_down_ids:
-            return 'down'
-        return None
-
-    def _riser_designation(self, pipe):
-        """Return the riser designation for this pipe on this plan, or None.
-
-        Geometry decides which sides of the floor the run exists on; flow
-        decides the wording (all six strings live in config.AUTO_RISER_*):
-
-                                  flow UP        flow DOWN
-            above only            T/A            F/A
-            below and above       F/B - T/A      F/A - T/B
-            below only            F/B            T/B
-
-        None whenever the rule does not apply (not a plan view, pipe not
-        vertical, no flow picked) - the caller then uses the normal flow.
-        Cached per pipe, so the run walk happens once per pipe per session.
-        """
-        pipe_id = utils.element_id_value(pipe.Id)
-        if pipe_id in self._riser_designations:
-            return self._riser_designations[pipe_id]
-
-        designation = None
-        elevation = self._plan_level_elevation()
-        if elevation is not None:
-            direction = utils.get_element_direction(pipe)
-            if direction is not None and abs(direction.Z) >= 0.7:
-                flow = self._riser_flow(pipe)
-                extent = runs.riser_extent(pipe) if flow else None
-                # Both bounds must be real numbers: an empty walk must fall
-                # back to the normal flow, never fabricate a designation
-                # (None compares below every number in IronPython 2.7).
-                if (extent is not None
-                        and extent[0] is not None
-                        and extent[1] is not None):
-                    tolerance = utils.mm_to_feet(
-                        config.RISER_LEVEL_TOLERANCE_MM)
-                    below = extent[0] < elevation - tolerance
-                    above = extent[1] > elevation + tolerance
-                    up = flow == 'up'
-                    if below and above:
-                        designation = config.auto_riser_through(up)
-                    elif above:
-                        designation = (config.AUTO_RISER_UP_ABOVE if up
-                                       else config.AUTO_RISER_DOWN_ABOVE)
-                    elif below:
-                        designation = (config.AUTO_RISER_UP_BELOW if up
-                                       else config.AUTO_RISER_DOWN_BELOW)
-
-        self._riser_designations[pipe_id] = designation
-        return designation
-
     def _horizontal_designation(self, pipe):
         """Return AT H/L / AT L/L for a horizontal pipe on a plan, or None.
 
         High Level at or above config.AUTO_HORIZONTAL_THRESHOLD_MM above the
-        plan's floor, Low Level below it. None for a vertical pipe (a riser,
-        handled by _riser_designation), a non-plan view, or a pipe whose height
+        plan's floor, Low Level below it. None for a vertical pipe (a riser -
+        they carry no designation), a non-plan view, or a pipe whose height
         cannot be measured. Every horizontal pipe qualifies - no system filter.
         """
         if not config.AUTO_TAG_ENABLED:
@@ -450,88 +356,13 @@ class TagManager(object):
     def _pipe_designation(self, pipe):
         """Return the Auto designation to write into a pipe's Comments, or None.
 
-        A vertical riser gets its F/B / T/A designation (flow x geometry); any
-        other pipe on the plan gets AT H/L / AT L/L by height. None when neither
-        rule applies (not a pipe, not a plan, no geometry, riser not picked).
+        A pipe on a plan gets AT H/L / AT L/L by height. None when the rule does
+        not apply (not a pipe, not a plan, no geometry, or a vertical pipe -
+        risers carry no designation since the flow prompt was removed).
         """
         if not isinstance(pipe, Pipe):
             return None
-        riser = self._riser_designation(pipe)
-        if riser is not None:
-            return riser
         return self._horizontal_designation(pipe)
-
-    def _is_riser(self, element):
-        """True if this element is a riser that earns a designation."""
-        return (config.RISER_TAG_ENABLED
-                and isinstance(element, Pipe)
-                and self._riser_designation(element) is not None)
-
-    def _riser_tag_type_id(self, element, tag_category):
-        """Return the single riser tag symbol id for a designated riser, else None.
-
-        The designation (F/B, T/A, ...) is NOT a tag type - it is written to the
-        tag's instance parameter afterwards (see _apply_riser_designation). Here
-        we only choose the one riser tag family to place. Returns None for
-        anything that is not a designated riser, or when that family is not
-        loaded (logged) - the caller then uses the normal selection.
-        """
-        if self._comments_mode:
-            # Auto mode places one ordinary pipe tag on every pipe and puts the
-            # designation in Comments, so there is no riser tag type to pick.
-            return None
-        if not self._is_riser(element):
-            return None
-
-        if 'riser' in self._riser_type_cache:
-            return self._riser_type_cache['riser']
-
-        family_name, type_name = config.RISER_TAG_TYPE
-        symbol_id = self._find_symbol(tag_category, family_name, type_name)
-        if symbol_id is None:
-            utils.logger.warning(
-                'Riser tag "{} : {}" is not loaded in this project; risers '
-                'fall back to the normal tag type.'.format(
-                    family_name, type_name))
-        self._riser_type_cache['riser'] = symbol_id
-        return symbol_id
-
-    def _apply_riser_designation(self, tag, element):
-        """Write the riser designation onto the tag's instance parameter.
-
-        Called for every riser tag - new or reused - so a re-run keeps the text
-        current if the flow pick or the geometry changed. A missing / read-only
-        parameter is logged, not fatal: the tag still stands, just without the
-        F/B / T/A text, which shows up plainly on the drawing.
-        """
-        if self._comments_mode:
-            return    # Auto mode writes the pipe's Comments instead
-        if not self._is_riser(element):
-            return
-        designation = self._riser_designation(element)
-        if designation is None:
-            return
-
-        parameter = tag.LookupParameter(config.RISER_DESIGNATION_PARAM)
-        if parameter is None or parameter.IsReadOnly:
-            if not self._riser_param_warned:
-                # Once per run: a missing parameter usually means the riser tag
-                # family isn't loaded (so a normal tag was placed) or the name
-                # is wrong - the same for every riser, so don't repeat it.
-                utils.logger.warning(
-                    'Riser designation parameter "{}" is not a writable '
-                    'parameter on the tag; the designation was not written. '
-                    '(Check RISER_TAG_TYPE is loaded and '
-                    'RISER_DESIGNATION_PARAM is right.)'.format(
-                        config.RISER_DESIGNATION_PARAM))
-                self._riser_param_warned = True
-            return
-        try:
-            parameter.Set(designation)
-        except Exception as ex:
-            utils.logger.debug(
-                'Setting riser designation on tag {} failed: {}'.format(
-                    utils.element_id_value(tag.Id), ex))
 
     # -- runtime tag type selection ----------------------------------------
     def categories_needing_tags(self, elements):
@@ -555,10 +386,9 @@ class TagManager(object):
                 continue
             tag_category = config.SUPPORTED_CATEGORIES.get(category_value)
             if tag_category is not None and (
-                    self._riser_tag_type_id(element, tag_category) is not None
-                    or self._elevation_tag_type_id(element, tag_category)
+                    self._elevation_tag_type_id(element, tag_category)
                     is not None):
-                continue  # Auto riser/HL/LL type - no tag type to choose.
+                continue  # Auto HL/LL type - no tag type to choose.
             if category_value not in pending:
                 pending[category_value] = utils.get_category_name(element)
         return pending
@@ -691,7 +521,6 @@ class TagManager(object):
 
                 if tag is not None:
                     tags.append(tag)
-                    self._apply_riser_designation(tag, element)
             except Exception as ex:
                 failures.append((element_id, str(ex)))
                 utils.logger.error('Tagging element {} failed: {}'.format(

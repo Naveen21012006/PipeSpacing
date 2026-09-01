@@ -109,69 +109,12 @@ def ask_alignment_method():
         methods, message='Choose alignment method:')
 
 
-def pick_risers_by_flow():
-    """Loop a direction prompt, picking the risers for each chosen direction.
-
-    A button prompt (CommandSwitchWindow) asks which way to tag; you pick those
-    risers and it returns to the prompt. Choose both directions (any order) or
-    just one, then 'Done'. Everything merges into one column. Choosing 'Done'
-    first (or closing the prompt) leaves both lists empty -> plain tagging.
-
-    Returns:
-        (down_elements, up_elements): the accumulated picked elements.
-    """
-    down_option = 'Top to bottom (down / return)'
-    up_option = 'Bottom to top (up / supply)'
-    done_option = 'Done - tag now'
-
-    down_elements = []
-    up_elements = []
-    while True:
-        choice = forms.CommandSwitchWindow.show(
-            [down_option, up_option, done_option],
-            message='Pick a flow direction, then select those risers:')
-        if not choice or choice == done_option:
-            break
-        if choice == down_option:
-            down_elements.extend(selection.prompt_for_elements(
-                'Risers flowing TOP to BOTTOM (down): click them, then Finish.'))
-        else:
-            up_elements.extend(selection.prompt_for_elements(
-                'Risers flowing BOTTOM to TOP (up): click them, then Finish.'))
-    return down_elements, up_elements
-
-
-def _is_plan_view(view):
-    """True if the view looks straight down (a plan), where risers are points."""
-    try:
-        return view.GenLevel is not None
-    except Exception:
-        return False
-
-
 def _is_vertical_pipe(element):
     """True if this element is a pipe running vertically (a riser)."""
     if not isinstance(element, Pipe):
         return False
     direction = utils.get_element_direction(element)
     return direction is not None and abs(direction.Z) >= 0.7
-
-
-def _unique_elements(elements):
-    """Drop repeats by element id, keeping order.
-
-    The two riser picks are independent selections, so the same element (a
-    valve or fitting on the riser) can be clicked in both - merging the lists
-    would otherwise tag it twice.
-    """
-    seen = set()
-    unique = []
-    for element in elements:
-        element_id = utils.element_id_value(element.Id)
-        if element_id not in seen:
-            seen.add(element_id)
-            unique.append(element)
-    return unique
 
 
 def report(method, created, reused, moved, leaders_updated, ignored, failures):
@@ -256,38 +199,12 @@ def main():
             return
         context['reference_line'] = reference_line
 
-    # --- the two labelled riser picks (down risers, then up risers) -------
-    # Both riser methods take these picks to learn each riser's flow. Geometry
-    # (below / above the floor) is automatic; you supply only the direction, by
-    # which pick you click a riser in.
-    #
-    #   Cluster Risers by Flow -> the picks ARE the selection (risers only).
-    #   Auto Tag Pipes         -> the picks only set flow; the WHOLE selection
-    #                             (horizontals + risers) is tagged, so the picks
-    #                             do not narrow it.
-    elements = None
-    if (config.RISER_TAG_ENABLED and strategy is not None
-            and getattr(strategy, 'assigns_riser_flow', False)
-            and _is_plan_view(view)):
-        down, up = pick_risers_by_flow()
-        manager.set_riser_flow_elements(up, down)
-        marked = _unique_elements(list(down) + list(up))
-        if auto:
-            # Tag the whole selection: the marked risers (flow known) plus every
-            # flat pipe from the broad selection. Unmarked verticals are dropped
-            # so a riser you did not give a direction never gets a blank tag.
-            broad = preselected or selection.prompt_for_elements(
-                'Select ALL the pipes to tag (risers included), then Finish.')
-            flats = [e for e in broad if not _is_vertical_pipe(e)]
-            elements = _unique_elements(marked + flats)
-        elif marked:
-            elements = marked
-
     # --- select and validate the elements ---------------------------------
-    # The riser picks are the selection when they happened; otherwise a
-    # pre-selection (captured before the picks) wins, else pick now.
-    if not elements:
-        elements = preselected or selection.prompt_for_elements()
+    # A pre-selection wins; otherwise pick now. Risers used to be picked
+    # separately, once per flow direction, so each could be given an F/B / T/A
+    # designation; that prompt was removed on the user's instruction
+    # (2026-09-01) and vertical pipes are now tagged like any other pipe.
+    elements = preselected or selection.prompt_for_elements()
     if not elements:
         forms.alert('Select one or more MEP elements first.', title=TITLE)
         return
@@ -308,9 +225,10 @@ def main():
         pipes = [element for element in supported if isinstance(element, Pipe)]
         others = [element for element in supported if not isinstance(element, Pipe)]
         if auto:
-            # Group only the flat pipes into runs. Every marked riser keeps its
-            # own tag (and its own Comments), because each storey slice carries
-            # a different designation - grouping would collapse them into one.
+            # Group only the flat pipes into runs; every vertical pipe keeps its
+            # own tag. A riser is sliced one segment per storey, and run
+            # grouping walks through those joints - it would collapse a whole
+            # stack onto a single tag and leave the other storeys unlabelled.
             flats = [pipe for pipe in pipes if not _is_vertical_pipe(pipe)]
             risers = [pipe for pipe in pipes if _is_vertical_pipe(pipe)]
             to_tag = runs.representatives(flats) + risers + others
