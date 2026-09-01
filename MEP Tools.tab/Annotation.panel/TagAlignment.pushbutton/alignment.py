@@ -1787,9 +1787,22 @@ class _ClusterReferenceLine(AlignmentStrategy):
         # only hard to read).
         min_drop_rule = max(clear, config.AUTO_MIN_DROP_ROWS * pitch)
 
-        def _stubs(candidate):
-            """Drops too short to show a stem above the arrowhead."""
-            count = 0
+        def _shape_faults(candidate):
+            """(stubs, upward) - the two ways a drop can read badly.
+
+            stub:    shorter than the arrowhead, so no stem shows above it and
+                     the reader cannot see which way it points.
+            upward:  the tag sits BELOW its own pipe, so the arrow points up
+                     while the rest of its block points down. It also strands
+                     that tag a row or more from the others, which is the gap
+                     the user marked on 2026-09-01 - one tag adrift under a
+                     block of three.
+
+            Upward is scored last: it is inconsistent rather than unreadable,
+            and where a pipe sits above the drawn line there is no arrangement
+            that points down at all, so it must stay a soft fault.
+            """
+            stubs = upward = 0
             for spec in candidate['specs']:
                 if spec[0] not in ('horiz', 'riser'):
                     continue
@@ -1798,32 +1811,35 @@ class _ClusterReferenceLine(AlignmentStrategy):
                 if row_v is None:
                     continue
                 if abs(row_v - pipe_up[index]) < min_drop_rule - 1e-9:
-                    count += 1
-            return count
+                    stubs += 1
+                if row_v < pipe_up[index]:
+                    upward += 1
+            return stubs, upward
 
         lift_rows = max(0, int(config.AUTO_CEILING_LIFT_ROWS))
         layout = _layout(line_top)
         crossings = _audit(layout)
-        audit_trail = [(0, len(crossings), _stubs(layout))]
+        first = (len(crossings),) + _shape_faults(layout)
+        audit_trail = [(0,) + first]
         lifted = 0.0
-        if (crossings or _stubs(layout)) and lift_rows:
-            best = ((len(crossings), _stubs(layout)), 0, layout, crossings)
+        if any(first) and lift_rows:
+            best = (first, 0, layout, crossings)
             for step in range(1, lift_rows + 1):
                 trial = _layout(line_top + step * pitch)
                 found = _audit(trial)
-                score = (len(found), _stubs(trial))
-                audit_trail.append((step, score[0], score[1]))
+                score = (len(found),) + _shape_faults(trial)
+                audit_trail.append((step,) + score)
                 if score < best[0]:
                     best = (score, step, trial, found)
-                if score == (0, 0):
+                if not any(score):
                     break
             layout, crossings, lifted = best[2], best[3], best[1] * pitch
             if best[1]:
                 utils.logger.debug(
                     'Auto Tag: column lifted {0} row(s) above the drawn line '
-                    '- {1} crossing(s) and {2} stub drop(s), from {3} and '
-                    '{4}.'.format(best[1], best[0][0], best[0][1],
-                                  audit_trail[0][1], audit_trail[0][2]))
+                    '- {1} crossing(s), {2} stub(s), {3} upward arrow(s); was '
+                    '{4}.'.format(best[1], best[0][0], best[0][1], best[0][2],
+                                  first))
         kinds = layout['kinds']
         height_targets = layout['height']
         drop_reach = layout['drop']

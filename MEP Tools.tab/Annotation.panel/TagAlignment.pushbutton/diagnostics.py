@@ -229,15 +229,18 @@ def write_run(view, settings, pitch, column_u, line_top, outward,
         if audit_trail:
             add('--- audit passes -------------------------------------')
             add('  the column may rise above the drawn line to clear a')
-            add('  crossing or a stub drop (one too short to show a stem')
-            add('  above its arrowhead); the smallest lift that works wins.')
-            best = min(entry[1:3] for entry in audit_trail)
+            add('  crossing, a stub drop (too short to show a stem above its')
+            add('  arrowhead) or an upward arrow (tag below its own pipe);')
+            add('  the smallest lift that works is the one kept.')
+            best = min(tuple(entry[1:4]) for entry in audit_trail)
             for entry in audit_trail:
-                lift, found, stubs = entry[0], entry[1], entry[2]
-                add('  lift {0} row(s) -> {1} crossing(s), {2} stub(s){3}'
-                    .format(lift, found, stubs,
-                            '   <- kept' if (found, stubs) == best else ''))
-                if (found, stubs) == best:
+                score = tuple(entry[1:4])
+                add('  lift {0} row(s) -> {1} crossing(s), {2} stub(s), '
+                    '{3} upward{4}'.format(entry[0], score[0], score[1],
+                                           score[2],
+                                           '   <- kept' if score == best
+                                           else ''))
+                if score == best:
                     break
             add('')
         add('--- self-check ---------------------------------------')
