@@ -192,6 +192,20 @@ _ASSIST_STEPS = (-3.0, -2.5, -2.0, -1.5, -1.0, -0.5,
 _LONG_CLIMB_ROWS = 1.25   # a rise past this many rows spans a neighbour's row
 
 
+class _QuietLog(object):
+    """A logger that swallows everything.
+
+    ordered_plan's robustness pass logs outliers through the module-global
+    file_log, and align_tags.log is the Align Tags maintainer's primary
+    forensic instrument (their request, 2026-09-03): twelve probe calls per
+    pick must not write probe noise between the real picks' lines. The REAL
+    pick's plan logs normally; only the probes run muted.
+    """
+
+    def __getattr__(self, _name):
+        return lambda *a, **k: None
+
+
 def _long_climbs(plan, pitch):
     """(count, total_rise) of entries whose final segment rises > the cap."""
     entries = plan.values() if isinstance(plan, dict) else plan
@@ -232,16 +246,24 @@ def _install_pick_assist(align):
             if not bad or vertical <= 0.0:
                 return plan
             best_bad, best_delta = bad, None
-            for step in _ASSIST_STEPS:
-                delta = step * vertical
-                probe = original((anchor2d[0], anchor2d[1] + delta),
-                                 base_items, targets, eff_mode, bundle,
-                                 config, vertical, landing, horizontal)
-                probe_bad, _r = _long_climbs(probe, vertical)
-                if (probe_bad < best_bad
-                        or (probe_bad == best_bad and best_delta is not None
-                            and abs(delta) < abs(best_delta))):
-                    best_bad, best_delta = probe_bad, delta
+            real_log = getattr(align, 'file_log', None)
+            try:
+                if real_log is not None:
+                    align.file_log = _QuietLog()
+                for step in _ASSIST_STEPS:
+                    delta = step * vertical
+                    probe = original((anchor2d[0], anchor2d[1] + delta),
+                                     base_items, targets, eff_mode, bundle,
+                                     config, vertical, landing, horizontal)
+                    probe_bad, _r = _long_climbs(probe, vertical)
+                    if (probe_bad < best_bad
+                            or (probe_bad == best_bad
+                                and best_delta is not None
+                                and abs(delta) < abs(best_delta))):
+                        best_bad, best_delta = probe_bad, delta
+            finally:
+                if real_log is not None:
+                    align.file_log = real_log
             if best_delta is not None and best_bad < bad:
                 millimetres = align.common.feet_to_mm(abs(best_delta))
                 output.print_md(
