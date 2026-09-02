@@ -106,8 +106,11 @@ implements, so you can verify output rather than trust it:
 - **Reaching a horizontal pipe** → horizontal landing + TRUE 90° bend onto
   the pipe. Turns fan equidistantly, anchored ahead of the text (never at the
   pipe's far end), confined to the near 60% of the run.
-- **Climbing to a vertical pipe** → landing + climb leaning 7.5°
-  (`engine.TILT_DEG`) off vertical, so a leader never draws along a pipe.
+- **Climbing to a vertical pipe** → landing + climb leaning 15°
+  (`engine.TILT_DEG`, raised from 7.5° on 2026-09-03 — user's field
+  verdict: the shallow lean read as riding the pipe; spec "75 degree"
+  from horizontal) off vertical, so a leader never draws along a pipe.
+  Read the constant, never restate the number.
 - **Arrows** keep 250 mm clearance from bends/ends/fittings and from each
   other on short runs.
 - **Clusters are physical pipe bundles**: parallel within 10°, side-by-side
@@ -157,7 +160,7 @@ log-proven; your bridge currently trips on the first one:
 2. Text left edges flush on one column, both sides of the pipes; ragged
    edges never face a flush requirement.
 3. No leader drawn along a pipe; horizontal runs get true 90° bends;
-   vertical climbs lean 7.5°.
+   vertical climbs lean at `engine.TILT_DEG` (15° since 2026-09-03).
 4. Rows never overlap: pitch = drawn text height + 100 mm clear.
 5. Re-running Auto Tag over its own output does not shift anything
    (verify-correct loop converges; nothing measured from stale leaders).

@@ -96,8 +96,12 @@ STRAIGHT_ANGLE_MAX = 0.5   # anything below reads as "straight leaders"
 # visually distinct from the orthogonal pipework (a strict vertical rise
 # next to a vertical pipe reads as part of the pipe), and because every
 # climb shares the same tilt they are parallel and can never cross.
-# User-specified: "less than 10 deg".
-TILT_DEG = 7.5
+# Originally "less than 10 deg" (7.5); raised 2026-09-03 on the user's
+# field verdict from the first congested-corner runs: at 7.5 a short
+# climb is visually indistinguishable from riding the pipe ("improper
+# leader arrows"). Their spec: "create an angle of 75 degree" from
+# horizontal = 15 off vertical. One constant, both buttons.
+TILT_DEG = 15.0
 
 _SWITCHED = {
     UPPER_LEFT: UPPER_RIGHT,

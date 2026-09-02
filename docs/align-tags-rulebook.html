@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Align Tags — Rule Book</title>
+<style>
+  :root{
+    --ink:#1F2328; --muted:#5A6472; --line:#C9CBC6; --soft:#F2F2EE;
+    --accent:#1F4E79; --accent-soft:#E4ECF4;
+    --bad:#B4232A; --good:#1F7A4D;
+    --pipe:#C2187C; --pipe2:#2247C6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; padding:0; background:#fff; color:var(--ink);
+    font:11pt/1.55 "Segoe UI", system-ui, sans-serif;}
+  @page{size:A4; margin:16mm 15mm 18mm 15mm;}
+  main{max-width:180mm; margin:0 auto;}
+
+  header.book{border-bottom:3px solid var(--accent); padding:10mm 0 6mm; margin-bottom:8mm;}
+  .eyebrow{font-size:8pt; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin:0 0 2mm;}
+  h1{font-size:24pt; margin:0 0 2mm; font-weight:650; letter-spacing:-.01em;}
+  .meta{color:var(--muted); font-size:9.5pt; margin:0;}
+
+  h2{font-size:14pt; margin:9mm 0 3mm; font-weight:650; color:var(--accent);
+    page-break-after:avoid;}
+  h2 .sn{font-variant-numeric:tabular-nums; margin-right:2mm;}
+
+  .rule{border:1px solid var(--line); border-left:4px solid var(--accent);
+    border-radius:2mm; padding:4mm 5mm; margin:0 0 5mm;
+    page-break-inside:avoid;}
+  .rule h3{margin:0 0 1.5mm; font-size:11.5pt; font-weight:650;}
+  .rule h3 .rn{color:var(--accent); font-variant-numeric:tabular-nums;}
+  .rule p{margin:1.5mm 0; max-width:165mm;}
+  .why{color:var(--muted); font-size:9.5pt;}
+  .why b{color:var(--ink);}
+
+  figure{margin:3mm 0 1mm; padding:3mm; background:var(--soft);
+    border-radius:1.5mm; page-break-inside:avoid;}
+  figcaption{font-size:8.5pt; color:var(--muted); margin-top:1.5mm;}
+  svg{display:block;}
+  svg text{font:8.5pt Consolas, ui-monospace, monospace; fill:var(--ink);}
+  svg .mut{fill:var(--muted);}
+  svg .lbl{font:8pt "Segoe UI", sans-serif;}
+
+  table{border-collapse:collapse; font-size:9.5pt; margin:2mm 0;
+    font-variant-numeric:tabular-nums; width:100%;}
+  th{text-align:left; font-size:8pt; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); font-weight:600; padding:1.5mm 3mm 1.5mm 0;
+    border-bottom:1px solid var(--ink);}
+  td{padding:1.8mm 3mm 1.8mm 0; border-bottom:1px solid var(--line); vertical-align:top;}
+  code{font-family:Consolas, ui-monospace, monospace; font-size:.9em;
+    background:var(--soft); padding:0 1mm; border-radius:1mm;}
+  .pill{display:inline-block; font-size:8pt; font-weight:600; padding:.3mm 2.5mm;
+    border-radius:99px; vertical-align:middle;}
+  .pill.g{background:#E7F2EC; color:var(--good);}
+  .pill.b{background:#F9E9E9; color:var(--bad);}
+  footer.book{margin-top:10mm; padding-top:4mm; border-top:1px solid var(--line);
+    color:var(--muted); font-size:9pt;}
+  .pagebreak{page-break-before:always;}
+</style>
+</head>
+<body>
+<main>
+
+<header class="book">
+  <p class="eyebrow">MEP Tools · PipeSpacing extension</p>
+  <h1>Align Tags — Rule Book</h1>
+  <p class="meta">Version 1.1 · 3 September 2026 (R6 climb angle 7.5°→15°) · Every rule below is field-tested in
+  Revit and enforced by the automated test suite. Auto Tag and Tag Manual follow the same rules through the shared
+  engine and settings, always at angle&nbsp;0. To change a rule, quote its number (R1, R2, …).</p>
+</header>
+
+<h2><span class="sn">1</span>The Pick</h2>
+
+<div class="rule">
+  <h3><span class="rn">R1</span> · The pick is the text block's bottom-left corner — on both sides</h3>
+  <p>Wherever you click, the <b>bottom-left corner of the lowest tag's text</b> lands there, to the
+  millimetre. The datum never mirrors with the side: left-hand stacks are ragged on their right,
+  right-hand stacks are ragged on their right too, so the flush left column always faces the reader
+  the same way.</p>
+  <p class="why"><b>Why:</b> one corner, one rule — mirroring the corner with the side made every
+  re-run land differently. The most-litigated rule in the tool; do not change casually.</p>
+  <figure>
+    <svg width="640" height="120" viewBox="0 0 640 120">
+      <line x1="60" y1="18" x2="60" y2="102" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="150" y="30" width="120" height="16" fill="none" stroke="var(--ink)"/>
+      <rect x="150" y="56" width="150" height="16" fill="none" stroke="var(--ink)"/>
+      <text x="156" y="42">ø200 mm HPS</text>
+      <text x="156" y="68">ø200 mm HPR AT HL</text>
+      <line x1="150" y1="38" x2="63" y2="38" stroke="var(--ink)"/>
+      <line x1="150" y1="64" x2="63" y2="64" stroke="var(--ink)"/>
+      <circle cx="150" cy="72" r="4" fill="var(--accent)"/>
+      <line x1="138" y1="84" x2="162" y2="60" stroke="var(--accent)" stroke-width="1.5"/>
+      <text x="120" y="100" class="lbl" fill="var(--accent)">your click = this corner</text>
+      <line x1="470" y1="18" x2="470" y2="102" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="510" y="30" width="120" height="16" fill="none" stroke="var(--ink)"/>
+      <rect x="510" y="56" width="100" height="16" fill="none" stroke="var(--ink)"/>
+      <line x1="510" y1="38" x2="473" y2="38" stroke="var(--ink)"/>
+      <line x1="510" y1="64" x2="473" y2="64" stroke="var(--ink)"/>
+      <circle cx="510" cy="72" r="4" fill="var(--accent)"/>
+      <text x="490" y="100" class="lbl" fill="var(--accent)">same corner on the right side</text>
+    </svg>
+    <figcaption>Fig. 1 — the datum corner (dot) is bottom-left on the left side AND on the right side of the pipes.</figcaption>
+  </figure>
+</div>
+
+<div class="rule">
+  <h3><span class="rn">R2</span> · The stack always fits — nudged back, never refused</h3>
+  <p>If your pick would put text on the pipes, the stack slides away just far enough:
+  <b>250&nbsp;mm clearance</b> plus the text width. The move is reported
+  (<code>Anchor nudged N mm clear of the pipes</code>). A pick is never rejected.</p>
+  <p class="why"><b>Why:</b> the old refusal guard rejected 43 picks in one session. A visible,
+  honest nudge beats a dead click.</p>
+  <figure>
+    <svg width="640" height="90" viewBox="0 0 640 90">
+      <line x1="300" y1="10" x2="300" y2="80" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="250" y="30" width="130" height="16" fill="none" stroke="var(--bad)" stroke-dasharray="3 3"/>
+      <text x="256" y="42" class="mut">picked here…</text>
+      <rect x="90" y="30" width="130" height="16" fill="none" stroke="var(--good)"/>
+      <text x="96" y="42">…lands here</text>
+      <line x1="245" y1="38" x2="228" y2="38" stroke="var(--good)" stroke-width="1.5"/>
+      <text x="330" y="42" class="lbl mut">gap = text + 250 mm, reported in the log</text>
+    </svg>
+    <figcaption>Fig. 2 — a pick inside the no-fit zone slides back; the distance is printed, never hidden.</figcaption>
+  </figure>
+</div>
+
+<div class="rule">
+  <h3><span class="rn">R3</span> · Place, measure, correct — never trust a prediction</h3>
+  <p>The family lies before it draws: boxes include stale leaders, and the text re-anchors with the
+  leader state. So the tool places the stack, <b>measures the drawn corner</b>, and re-plans once
+  with the residual — all inside one undo step. Re-running on an already-aligned stack does not
+  shift it.</p>
+  <p class="why"><b>Why:</b> pre-measured planning landed "internally perfect" stacks hundreds of
+  millimetres off the pick. Drawn geometry is the only truth. Calibrated head-to-edge distances are
+  banked <b>per project</b> (0 is a legitimate value); a constant learned in one model is never
+  spent in another.</p>
+</div>
+
+<h2><span class="sn">2</span>Side and Mode</h2>
+
+<div class="rule">
+  <h3><span class="rn">R4</span> · Your click decides Left/Right; the dialog decides Upper/Lower</h3>
+  <p>Click left of the tagged pipes' centre → stack left, leaders exit right. Click right → stack
+  right, leaders exit left. The centre reads <b>each pipe on its own axis</b> — a riser point
+  contributes its plan position, never its height. The dialog's mode contributes only Upper or
+  Lower.</p>
+  <p class="why"><b>Why:</b> a height read into the horizontal centre once pinned a riser cluster
+  LEFT for 29 clicks in a row. The side must always be winnable from where you click.</p>
+  <figure>
+    <svg width="640" height="100" viewBox="0 0 640 100">
+      <circle cx="320" cy="50" r="8" fill="none" stroke="var(--pipe)" stroke-width="2.5"/>
+      <circle cx="345" cy="50" r="8" fill="none" stroke="var(--pipe)" stroke-width="2.5"/>
+      <line x1="332" y1="14" x2="332" y2="86" stroke="var(--muted)" stroke-dasharray="4 3"/>
+      <text x="298" y="92" class="lbl mut">pipes' centre</text>
+      <line x1="150" y1="50" x2="120" y2="50" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="150" cy="50" r="4" fill="var(--accent)"/>
+      <text x="80" y="34" class="lbl" fill="var(--accent)">click LEFT → stack left</text>
+      <circle cx="500" cy="50" r="4" fill="var(--accent)"/>
+      <text x="450" y="34" class="lbl" fill="var(--accent)">click RIGHT → stack right</text>
+    </svg>
+    <figcaption>Fig. 3 — one comparison decides the side; Upper/Lower still comes from the saved mode.</figcaption>
+  </figure>
+</div>
+
+<div class="rule">
+  <h3><span class="rn">R5</span> · Plain click runs; Shift+click opens the dialog</h3>
+  <p>A plain click on the button aligns with the saved settings. <b>Shift+click</b> opens the
+  settings dialog first (the very first run always shows it). Angle&nbsp;0 selects the
+  straight-leader ruleset (§3); any other angle draws classic slanted leaders. <b>Auto Tag is
+  pinned to angle 0 permanently</b> — angled work is a deliberate manual act done with Align Tags.</p>
+</div>
+
+<h2><span class="sn">3</span>Leader Shapes at Angle 0</h2>
+
+<div class="rule">
+  <h3><span class="rn">R6</span> · Each tag shapes its leader by its own pipe's direction</h3>
+  <p>Within one stack, every tag looks at the pipe it points to:</p>
+  <p><b>Level with a vertical pipe</b> → one straight horizontal leader, elbow grip parked at the
+  line's midpoint.<br>
+  <b>Reaching a horizontal pipe</b> → horizontal landing, then a true 90° bend onto the pipe.
+  Bends fan out evenly, staying ahead of the text and inside the nearer 60% of the run.<br>
+  <b>Climbing to a vertical pipe</b> → landing plus a climb leaning 15° off vertical (a 75°
+  leader), so a climb never reads as part of the pipe it lands on. <em>Changed from 7.5° on
+  3&nbsp;Sep&nbsp;2026 — field verdict: the shallower lean was indistinguishable from riding the
+  pipe.</em></p>
+  <p>Arrows keep <b>250&nbsp;mm</b> clear of bends, fittings, pipe ends, and each other; on short
+  pipes the fan redistributes over each pipe's own length, so tags of short pipes sit closer
+  without crowding the long ones.</p>
+  <figure>
+    <svg width="640" height="120" viewBox="0 0 640 120">
+      <line x1="130" y1="15" x2="130" y2="105" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="20" y="42" width="76" height="14" fill="none" stroke="var(--ink)"/>
+      <line x1="96" y1="49" x2="127" y2="49" stroke="var(--ink)" stroke-width="1.2"/>
+      <text x="20" y="115" class="lbl mut">level: straight</text>
+      <line x1="230" y1="88" x2="400" y2="88" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="240" y="30" width="76" height="14" fill="none" stroke="var(--ink)"/>
+      <line x1="316" y1="37" x2="356" y2="37" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="356" y1="37" x2="356" y2="85" stroke="var(--ink)" stroke-width="1.2"/>
+      <text x="240" y="115" class="lbl mut">horizontal pipe: landing + 90°</text>
+      <line x1="590" y1="15" x2="590" y2="105" stroke="var(--pipe)" stroke-width="3"/>
+      <rect x="440" y="80" width="76" height="14" fill="none" stroke="var(--ink)"/>
+      <line x1="516" y1="87" x2="546" y2="87" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="546" y1="87" x2="563" y2="25" stroke="var(--ink)" stroke-width="1.2"/>
+      <text x="452" y="115" class="lbl mut">climb: 15° off vertical (75° leader)</text>
+    </svg>
+    <figcaption>Fig. 4 — the three angle-0 shapes. The 90° bend is exact; the climb's tilt keeps it distinct from pipework.</figcaption>
+  </figure>
+</div>
+
+<h2 class="pagebreak"><span class="sn">4</span>Stack Order</h2>
+
+<div class="rule">
+  <h3><span class="rn">R7</span> · Runs read like the drawing</h3>
+  <p>Vertical pipes: <b>leftmost pipe → top tag</b>. Horizontal pipes: <b>topmost pipe → top
+  tag</b>. The order is the same whichever side the stack sits on.</p>
+</div>
+
+<div class="rule">
+  <h3><span class="rn">R8</span> · Risers tagged from the side: by height, with parallel slants</h3>
+  <p>When the circles sit <b>beside</b> the tag rows, the topmost circle takes the top tag.
+  Every leader draws a short landing and then a slant <b>parallel to the whole cluster's shared
+  angle</b> — the steepest direct text-to-circle slope, clamped between 15° and 75° — straight
+  into its circle.</p>
+  <p class="why"><b>Why:</b> ordering by the circles' tiny horizontal stagger produced crossings;
+  per-leader angles read messy. Height order + one shared angle is the approved look.</p>
+  <figure>
+    <svg width="640" height="120" viewBox="0 0 640 120">
+      <rect x="30" y="18" width="110" height="13" fill="none" stroke="var(--ink)"/>
+      <rect x="30" y="44" width="110" height="13" fill="none" stroke="var(--ink)"/>
+      <rect x="30" y="70" width="110" height="13" fill="none" stroke="var(--ink)"/>
+      <line x1="140" y1="24" x2="185" y2="24" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="185" y1="24" x2="225" y2="34" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="140" y1="50" x2="175" y2="50" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="175" y1="50" x2="222" y2="62" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="140" y1="76" x2="168" y2="76" stroke="var(--ink)" stroke-width="1.2"/>
+      <line x1="168" y1="76" x2="220" y2="89" stroke="var(--ink)" stroke-width="1.2"/>
+      <circle cx="232" cy="36" r="7" fill="none" stroke="var(--pipe)" stroke-width="2.5"/>
+      <circle cx="229" cy="64" r="7" fill="none" stroke="var(--pipe)" stroke-width="2.5"/>
+      <circle cx="227" cy="91" r="7" fill="none" stroke="var(--pipe)" stroke-width="2.5"/>
+      <text x="300" y="40" class="lbl mut">topmost circle ↔ top tag</text>
+      <text x="300" y="58" class="lbl mut">all slants parallel, one shared angle (15–75°)</text>
+      <text x="300" y="76" class="lbl mut">bend sits on the landing line</text>
+    </svg>
+    <figcaption>Fig. 5 — side-approach risers: height order, short landings, one parallel sheaf of slants.</figcaption>
+  </figure>
+</div>
+
+<div class="rule">
+  <h3><span class="rn">R9</span> · Risers tagged from above or below: by column, nearest to nearest</h3>
+  <p>When the circles sit <b>wholly above or below</b> the tag rows, height is noise — the
+  horizontal position decides everything. <b>The row nearest the pipes takes the drop nearest the
+  stack, marching outward.</b> For a stack above the circles with leaders exiting left, that is
+  exactly: <b>leftmost circle → top tag, rightmost → bottom</b> — and it mirrors itself on the
+  other three sides so no configuration can cross. Each leader lands out to its circle's column
+  and enters with a <b>clean vertical drop</b> — no slant.</p>
+  <figure>
+    <svg width="640" height="150" viewBox="0 0 640 150">
+      <text x="30" y="16" class="lbl" fill="var(--bad)">✕ height-ordered (circles level: random pairing)</text>
+      <g stroke="var(--bad)" stroke-width="1.2" fill="none">
+        <path d="M 250 32 L 120 32 L 120 128"/>
+        <path d="M 250 56 L 60 56 L 60 128"/>
+        <path d="M 250 80 L 150 80 L 150 128"/>
+      </g>
+      <g fill="none" stroke="var(--ink)" stroke-width="1.5">
+        <circle cx="120" cy="134" r="5"/><circle cx="60" cy="134" r="5"/><circle cx="150" cy="134" r="5"/>
+      </g>
+      <text x="380" y="16" class="lbl" fill="var(--good)">✓ leftmost → top row</text>
+      <g stroke="var(--good)" stroke-width="1.2" fill="none">
+        <path d="M 600 32 L 400 32 L 400 128"/>
+        <path d="M 600 56 L 460 56 L 460 128"/>
+        <path d="M 600 80 L 510 80 L 510 128"/>
+      </g>
+      <g fill="none" stroke="var(--ink)" stroke-width="1.5">
+        <circle cx="400" cy="134" r="5"/><circle cx="460" cy="134" r="5"/><circle cx="510" cy="134" r="5"/>
+      </g>
+    </svg>
+    <figcaption>Fig. 6 — drops from above. Left: height order tangles when circles are level. Right: left-to-right down
+    the stack — every landing stops before the drops above it, crossing-free by construction.</figcaption>
+  </figure>
+</div>
+
+<h2><span class="sn">5</span>Clustering — what shares one stack</h2>
+
+<div class="rule">
+  <h3><span class="rn">R10</span> · A cluster is a physical pipe rack: three tests, all must pass</h3>
+  <p>Two tags share a stack only when their pipes form one rack:</p>
+  <table>
+    <tr><th>Test</th><th>Limit</th><th>Where set</th></tr>
+    <tr><td>1 · Pipes run <b>parallel</b></td><td>within 10°</td><td>fixed — <span class="pill b">unconditional</span> a
+    perpendicular pipe never joins, whatever the other dials say</td></tr>
+    <tr><td>2 · Pipes sit <b>side-by-side</b> (across the rack)</td><td>Rack Width</td><td>dialog · default 600 mm</td></tr>
+    <tr><td>3 · Tagged at the <b>same station</b> (along the run)</td><td>Cluster Distance</td><td>dialog · 0 = never split</td></tr>
+  </table>
+  <p>Chaining is transitive — A joins B, B joins C — so a wide group becomes one stack when each
+  <em>adjacent</em> gap passes. Clusters cap at <b>10 tags</b> (cut at the largest gap); rack
+  bundles have no span cap.</p>
+  <p class="why"><b>Why the two dials:</b> Cluster Distance works ALONG the run, Rack Width ACROSS
+  it. Runs spaced wider than the rack width tag one by one — raise Rack Width, not Cluster
+  Distance, when parallel pipes refuse to group.</p>
+  <figure>
+    <svg width="640" height="130" viewBox="0 0 640 130">
+      <g stroke="var(--pipe)" stroke-width="2.5">
+        <line x1="40" y1="30" x2="420" y2="30"/>
+        <line x1="40" y1="58" x2="420" y2="58"/>
+        <line x1="40" y1="96" x2="420" y2="96"/>
+      </g>
+      <line x1="470" y1="20" x2="470" y2="106" stroke="var(--pipe2)" stroke-width="2.5"/>
+      <line x1="150" y1="22" x2="230" y2="22" stroke="var(--good)" stroke-width="1.4"/>
+      <text x="152" y="14" class="lbl" fill="var(--good)">Cluster Distance — along</text>
+      <line x1="110" y1="30" x2="110" y2="58" stroke="var(--accent)" stroke-width="1.4"/>
+      <line x1="110" y1="58" x2="110" y2="96" stroke="var(--accent)" stroke-width="1.4"/>
+      <text x="118" y="48" class="lbl" fill="var(--accent)">Rack Width — across</text>
+      <text x="118" y="82" class="lbl" fill="var(--accent)">(each adjacent gap)</text>
+      <text x="440" y="120" class="lbl" fill="var(--bad)">perpendicular: never joins</text>
+    </svg>
+    <figcaption>Fig. 7 — the two dials act on different axes; the parallel test guards both.</figcaption>
+  </figure>
+</div>
+
+<h2><span class="sn">6</span>Spacing and Settings</h2>
+
+<div class="rule">
+  <h3><span class="rn">R11</span> · Row pitch = drawn text height + Vertical Spacing</h3>
+  <p>Vertical Spacing is a <b>clear gap between texts</b>, not a centre-to-centre pitch. The tool
+  measures the tallest drawn text in the cluster and adds the gap, so the same setting works at any
+  view scale. All lengths persist in <code>%APPDATA%\CKR\tag_align_settings.json</code>, shared by
+  Align Tags and Auto Tag — one dialog tunes both tools.</p>
+  <table>
+    <tr><th>Dialog field</th><th>Meaning</th></tr>
+    <tr><td>Vertical Spacing</td><td>clear gap between stacked texts</td></tr>
+    <tr><td>Landing Distance</td><td>horizontal run from the text before any bend</td></tr>
+    <tr><td>Horizontal Spacing</td><td>column offset for Intermittent layout only</td></tr>
+    <tr><td>Cluster Distance</td><td>max arrow separation along the run (R10 · test 3); 0 = never split</td></tr>
+    <tr><td>Rack Width</td><td>max pipe separation across the run (R10 · test 2)</td></tr>
+  </table>
+</div>
+
+<h2><span class="sn">7</span>Exiting the Command</h2>
+
+<div class="rule">
+  <h3><span class="rn">R12</span> · The exit cleanup may adjust a stack — never override your pick</h3>
+  <p>After the last pick, a cleanup pass resolves overlaps between the stacks placed this session
+  (earlier-placed wins; later yields). Every cluster has a <b>travel cap of about one text
+  width</b> from its pick. A conflict that cannot be cleared within the cap sends the cluster
+  <b>back to your pick</b>, and the overlap is reported —
+  <code>N held at their picks (travel cap)</code> — for manual adjustment. When the later cluster
+  caps out, the earlier one may clear the conflict instead, inside its own cap. One Ctrl+Z reverts
+  the whole cleanup.</p>
+  <p class="why"><b>Why:</b> the uncapped cleanup once dragged a stack across a garage view on
+  exit, stretching its leaders — the arrows stay pinned on the pipes while the text walks. Your
+  picks are deliberate and land to the millimetre; the cleanup must respect them.</p>
+  <figure>
+    <svg width="640" height="110" viewBox="0 0 640 110">
+      <text x="30" y="16" class="lbl" fill="var(--bad)">✕ before: shoved across the view</text>
+      <rect x="30" y="30" width="80" height="14" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/>
+      <rect x="200" y="72" width="80" height="14" fill="none" stroke="var(--bad)"/>
+      <line x1="110" y1="37" x2="200" y2="79" stroke="var(--bad)" stroke-width="1" stroke-dasharray="5 3"/>
+      <text x="118" y="66" class="lbl mut">leaders stretch behind it</text>
+      <text x="380" y="16" class="lbl" fill="var(--good)">✓ now: capped at one text width</text>
+      <rect x="380" y="30" width="80" height="14" fill="none" stroke="var(--good)"/>
+      <line x1="380" y1="52" x2="470" y2="52" stroke="var(--accent)" stroke-width="1.2"/>
+      <text x="380" y="66" class="lbl" fill="var(--accent)">max drift ≈ own width</text>
+      <text x="380" y="94" class="lbl mut">beyond that: snap back + report the conflict</text>
+    </svg>
+    <figcaption>Fig. 8 — the cleanup's leash. Unresolvable overlaps are reported honestly, not "solved" far away.</figcaption>
+  </figure>
+</div>
+
+<footer class="book">
+  <p><b>Changing a rule:</b> quote its number (e.g. "R9 — change the direction for below-stacks").
+  The rule is changed in code, its tests are updated, this book is edited at
+  <code>docs/align-tags-rulebook.html</code>, and the PDF is regenerated — book and behaviour never drift apart.</p>
+  <p>Sources of authority, in order: this book ← the test suite (tests/) ← the Auto Tag handoff
+  (docs/autotag-align-handoff.md). Where they disagree, the tests reflect what the tool actually does.</p>
+</footer>
+
+</main>
+</body>
+</html>
