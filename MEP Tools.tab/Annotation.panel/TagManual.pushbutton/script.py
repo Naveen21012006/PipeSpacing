@@ -172,6 +172,93 @@ def _install_pick_priority(align):
 
 
 # ---------------------------------------------------------------------------
+# Pick assist (P3-C, user build order 2026-09-03): shorten the climbs
+# ---------------------------------------------------------------------------
+# A leader whose final segment climbs more than a row occupies a vertical
+# corridor through the neighbouring rows' landings - the crossover the user
+# circled on 2026-09-03. The planner does not treat that corridor as an
+# obstacle (see proposal P3/P4), so the one lever that provably shrinks it is
+# the PICK: rows nearer the pipes mean shorter climbs.
+#
+# This assist wraps the alias's per-pick planner. After each real pick it
+# probes THE SAME planner - never a mirror of it - at a few vertically
+# shifted anchors, and when one of them would cut the number of long climbs
+# it says so, in millimetres, on the output panel. The user re-picks or
+# ignores; nothing is ever moved for them (Align Tags doctrine: a pick is
+# never overridden). Any assist failure is swallowed - placement must never
+# break because a hint could not be computed.
+_ASSIST_STEPS = (-3.0, -2.5, -2.0, -1.5, -1.0, -0.5,
+                 0.5, 1.0, 1.5, 2.0, 2.5, 3.0)   # in row pitches
+_LONG_CLIMB_ROWS = 1.25   # a rise past this many rows spans a neighbour's row
+
+
+def _long_climbs(plan, pitch):
+    """(count, total_rise) of entries whose final segment rises > the cap."""
+    entries = plan.values() if isinstance(plan, dict) else plan
+    count, total = 0, 0.0
+    for entry in entries:
+        if not entry:
+            continue
+        try:
+            rise = abs(entry['end'][1] - entry['line_v'])
+        except Exception:
+            continue
+        total += rise
+        if rise > _LONG_CLIMB_ROWS * pitch:
+            count += 1
+    return count, total
+
+
+def _install_pick_assist(align):
+    """Wrap the alias's ordered_plan with the climb hint. Idempotent."""
+    if getattr(align, '_tagmanual_pick_assist', False):
+        return
+    original = align.ordered_plan
+    state = {'anchor': None}
+
+    def assisted(anchor2d, base_items, targets, eff_mode, bundle, config,
+                 vertical, landing, horizontal):
+        plan = original(anchor2d, base_items, targets, eff_mode, bundle,
+                        config, vertical, landing, horizontal)
+        try:
+            # nudge_clear re-plans the same pick; hint only once per anchor.
+            previous = state['anchor']
+            if (previous is not None
+                    and abs(previous[1] - anchor2d[1]) < 1e-6
+                    and abs(previous[0] - anchor2d[0]) < 1e-6):
+                return plan
+            state['anchor'] = anchor2d
+            bad, _rise = _long_climbs(plan, vertical)
+            if not bad or vertical <= 0.0:
+                return plan
+            best_bad, best_delta = bad, None
+            for step in _ASSIST_STEPS:
+                delta = step * vertical
+                probe = original((anchor2d[0], anchor2d[1] + delta),
+                                 base_items, targets, eff_mode, bundle,
+                                 config, vertical, landing, horizontal)
+                probe_bad, _r = _long_climbs(probe, vertical)
+                if (probe_bad < best_bad
+                        or (probe_bad == best_bad and best_delta is not None
+                            and abs(delta) < abs(best_delta))):
+                    best_bad, best_delta = probe_bad, delta
+            if best_delta is not None and best_bad < bad:
+                millimetres = align.common.feet_to_mm(abs(best_delta))
+                output.print_md(
+                    ':bulb: {0} leader(s) climb more than a row here - '
+                    'picking about **{1:.0f} mm {2}** would cut that to '
+                    '{3}. Re-pick to take it, Esc to keep this one.'.format(
+                        bad, millimetres,
+                        'higher' if best_delta > 0 else 'lower', best_bad))
+        except Exception:
+            pass    # the hint is a courtesy; the plan already stands
+        return plan
+
+    align.ordered_plan = assisted
+    align._tagmanual_pick_assist = True
+
+
+# ---------------------------------------------------------------------------
 # Stage-1 helpers (orchestration shared with Auto Tag's entry point; the
 # LOGIC all lives in the imported TagAlignment modules)
 # ---------------------------------------------------------------------------
@@ -299,6 +386,7 @@ def main():
     # --- stage 2: Align Tags places them, rack by rack --------------------
     align = _load_align()
     _install_pick_priority(align)   # vertical racks first, top to bottom
+    _install_pick_assist(align)     # P3-C: hint when a pick forces climbs
 
     wrapped = []
     for tag in tags:
