@@ -97,6 +97,81 @@ def _load_align():
 
 
 # ---------------------------------------------------------------------------
+# Pick priority: vertical racks first, each family top-to-bottom
+# ---------------------------------------------------------------------------
+# (User rule, 2026-09-02: "align priority is first of all it should start
+# from vertical cluster that is also from top to bottom wise". The same
+# vertical-first doctrine as Auto Tag, 2026-08-03, applied to the PICK ORDER.)
+#
+# Align Tags' split_clusters sorts racks left-to-right; membership is exactly
+# what Tag Manual wants, the ORDER is not. So the loaded alias gets a wrapper
+# that re-sorts its output - Align Tags' own button is untouched (it runs its
+# file fresh, never this instance) and rack membership is never altered.
+#
+# A pleasant consequence: the final-arrangement cleanup moves the LATER-placed
+# rack of a conflicting pair, so placing vertical racks first also means they
+# WIN cross-rack conflicts - the priority holds through cleanup, not just at
+# the prompt.
+def _rack_family(targets, members, basis, to_2d):
+    """0 = screen-vertical rack (straight-leader family), 1 = the rest.
+
+    Per member, the drawn direction on screen decides - the same test Auto
+    Tag classifies with: a pipe is 'across the page' only when its u-travel
+    exceeds its v-travel. A riser point has no drawn direction and counts
+    for neither; a rack of only risers (or of tags with no pipe curve)
+    belongs with the drop family.
+    """
+    vertical = horizontal = 0
+    for index in members:
+        pair = targets[index].tagged_curve()
+        if pair is None:
+            continue
+        u0, v0 = to_2d(pair[0], basis)
+        u1, v1 = to_2d(pair[1], basis)
+        du, dv = abs(u1 - u0), abs(v1 - v0)
+        if du < 1e-9 and dv < 1e-9:
+            continue                    # a point in this view: a riser
+        if du > dv:
+            horizontal += 1
+        else:
+            vertical += 1
+    return 0 if vertical > horizontal else 1
+
+
+def _rack_position(targets, members):
+    """(top_v, centre_u) of a rack, read from the leader arrows."""
+    tops, centres = [], []
+    for index in members:
+        u, v = getattr(targets[index], 'primary_end2d', (0.0, 0.0))
+        tops.append(v)
+        centres.append(u)
+    return max(tops), sum(centres) / float(len(centres))
+
+
+def _install_pick_priority(align):
+    """Re-order the alias's split_clusters: vertical racks first, then
+    top-to-bottom within each family (left-to-right as the tie-break).
+    Idempotent - the alias survives across clicks in one pyRevit session."""
+    if getattr(align, '_tagmanual_pick_priority', False):
+        return
+    original = align.split_clusters
+
+    def prioritised(targets, config, basis):
+        groups = original(targets, config, basis)
+
+        def key(members):
+            top_v, centre_u = _rack_position(targets, members)
+            return (_rack_family(targets, members, basis,
+                                 align.common.to_2d),
+                    -top_v, centre_u, min(members))
+
+        return sorted(groups, key=key)
+
+    align.split_clusters = prioritised
+    align._tagmanual_pick_priority = True
+
+
+# ---------------------------------------------------------------------------
 # Stage-1 helpers (orchestration shared with Auto Tag's entry point; the
 # LOGIC all lives in the imported TagAlignment modules)
 # ---------------------------------------------------------------------------
@@ -223,6 +298,7 @@ def main():
 
     # --- stage 2: Align Tags places them, rack by rack --------------------
     align = _load_align()
+    _install_pick_priority(align)   # vertical racks first, top to bottom
 
     wrapped = []
     for tag in tags:
