@@ -325,7 +325,7 @@ class AlignmentStrategy(object):
     groups_runs = False
 
     # Set True for the Auto method: tag the WHOLE selection, write each pipe's
-    # designation into its Comments, and lay horizontals and risers out as two
+    # tag family per pipe, and lay horizontals and risers out as two
     # blocks on the one reference line. script.py reads this flag.
     writes_comments = False
 
@@ -1905,17 +1905,17 @@ class _ClusterReferenceLine(AlignmentStrategy):
 class AutoTagPipes(_ClusterReferenceLine):
     """One selection, sorted automatically into horizontals and risers.
 
-    The tool reads each pipe's direction: horizontals get AT H/L / AT L/L by
-    height and that designation is WRITTEN into the pipe's Comments, which one
-    ordinary pipe tag (Size + System Abbreviation + Comments) shows - so there
-    is no tag-type switching. Risers carry no designation (the flow prompt that
-    supplied it was removed 2026-09-01) but are still laid out as their own
-    block: the two families sit as two blocks on the one reference line,
+    The tool reads each pipe's direction to choose its leader treatment, and
+    one ordinary pipe tag family serves every pipe - no tag-type switching.
+    Nothing is written to the elements: the AT H/L / AT L/L Comments write was
+    removed 2026-09-03 on the user's order ("you should not add any words in
+    the comment section"), as the riser designations were on 2026-09-01. The
+    two families still lay out as two blocks on the one reference line,
     horizontals above, risers below.
     """
     name = 'Auto Tag Pipes'
-    description = ('One selection: sorts horizontals (H/L / L/L by height) from '
-                   'risers and writes each pipe\'s Comments.')
+    description = ('One selection: sorts horizontals from risers and lays '
+                   'both out on one reference line.')
     edge = EDGE_LOW
     writes_comments = True
 

@@ -187,8 +187,10 @@ def main():
     context = {'doc': doc}
     strategy = alignment.get_strategy(method)
 
-    # The Auto method writes each pipe's designation into its Comments and uses
-    # one ordinary tag family, so tell the manager to stop switching tag types.
+    # The Auto method uses one ordinary tag family for every pipe, so tell
+    # the manager to stop switching tag types. (It once also wrote each
+    # pipe's designation into its Comments; removed 2026-09-03 on the user's
+    # order - the tool never modifies the tagged elements.)
     auto = strategy is not None and getattr(strategy, 'writes_comments', False)
     manager.set_comments_mode(auto)
 
@@ -267,11 +269,6 @@ def main():
         # --- stage 1: every element ends up with exactly one usable tag ---
         with Transaction(doc, 'Create MEP Tags') as transaction:
             transaction.Start()
-            # Auto method: stamp each pipe's designation into its Comments first
-            # so the single tag family reads the right text once placed.
-            if auto:
-                _written, comment_failures = manager.write_pipe_comments(to_tag)
-                failures.extend(comment_failures)
             tags, created, reused, tag_failures = manager.ensure_tags(to_tag)
             transaction.Commit()
         failures.extend(tag_failures)

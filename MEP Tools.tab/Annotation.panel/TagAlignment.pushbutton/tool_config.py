@@ -125,33 +125,23 @@ ELEVATION_TAG_SYSTEMS = ['water']
 
 
 # ---------------------------------------------------------------------------
-# Auto Tag Pipes: one method, one tag family, the designation on the pipe
+# Auto Tag Pipes: one method, one tag family, nothing written to the model
 # ---------------------------------------------------------------------------
-# The "Auto Tag Pipes" method reads each selected pipe's direction and routes
-# it. Every pipe then WRITES its designation into the built-in Comments
-# parameter, and a single tag family (Size + System Abbreviation + Comments)
-# shows it - no per-pipe tag type, no tag parameter. Per storey is automatic:
-# each sliced segment holds its own Comments and its own tag.
+# The "Auto Tag Pipes" method reads each selected pipe's direction only to
+# choose its LEADER treatment; a single tag family serves every pipe.
 #
-#   horizontal pipe  ->  by centreline height above the plan's floor:
-#                          >= AUTO_HORIZONTAL_THRESHOLD_MM  ->  AUTO_HL
-#                          below it                         ->  AUTO_LL
+# The tools no longer write ANYTHING to the tagged elements. Two features
+# were removed on the user's orders, in sequence:
+#   2026-09-01  riser designations (F/B, T/A, ...) went with the flow prompt
+#               that was their only input.
+#   2026-09-03  the AT H/L / AT L/L Comments write went entirely ("you should
+#               not add any words in the comment section"). AUTO_TAG_ENABLED,
+#               AUTO_HORIZONTAL_THRESHOLD_MM, AUTO_HL and AUTO_LL left with
+#               it - dead knobs are traps, not options.
 #
-#   vertical riser   ->  no designation. Risers used to earn an F/B / T/A code
-#                        from the flow direction you picked at the start of a
-#                        run; that prompt was removed on the user's instruction
-#                        (2026-09-01), and with it the only source of flow. A
-#                        riser is now tagged like any other pipe, with its
-#                        Comments left alone.
-#
-# Change any wording here and every tag follows. Empty separators or blank
-# codes are fine if a project spells them differently.
-AUTO_TAG_ENABLED = True
-
-# Horizontals, by height above the plan's floor.
-AUTO_HORIZONTAL_THRESHOLD_MM = 1500.0
-AUTO_HL = 'AT H/L'          # centreline at or above the threshold
-AUTO_LL = 'AT L/L'          # below the threshold
+# Values written by runs BEFORE 2026-09-03 remain in those pipes' Comments
+# (and on their tags) until cleared by hand; the tools will neither refresh
+# nor remove them.
 
 # How far apart (paper mm, scaled by view scale) the horizontal block and the
 # riser block sit on the reference line, on top of the normal tag pitch.

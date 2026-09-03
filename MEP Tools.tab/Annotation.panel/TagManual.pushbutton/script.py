@@ -9,10 +9,10 @@ The tool is a marriage of the two siblings, each doing the half it is trusted
 with, and NEITHER sibling is modified:
 
   stage 1 - TAGGING, from TagAlignment.pushbutton (imported live):
-      select pipes -> write each horizontal pipe's designation (AT H/L /
-      AT L/L by height) into its built-in Comments -> group flat runs one
-      tag per run, risers one tag per storey slice -> create or reuse tags.
-      One assimilated undo step.
+      select pipes -> group flat runs one tag per run, risers one tag per
+      storey slice -> create or reuse tags. One assimilated undo step.
+      Nothing is ever written to the tagged elements (the AT H/L / AT L/L
+      Comments write was removed 2026-09-03 on the user's order).
 
   stage 2 - PLACEMENT, from AlignTags.pushbutton (imported live):
       the field-tested cluster-by-cluster pick loop: the selection splits
@@ -367,7 +367,7 @@ def main():
         return
 
     manager = tag_manager.TagManager(doc, view)
-    manager.set_comments_mode(True)   # designation -> pipe Comments (R5-R9)
+    manager.set_comments_mode(True)   # one family for every pipe; no writes
     to_tag = _one_tag_per_run(supported)
 
     # Tag-type choice happens BEFORE any transaction, so cancelling here
@@ -387,8 +387,6 @@ def main():
     try:
         with Transaction(doc, 'Create MEP Tags') as transaction:
             transaction.Start()
-            written, comment_failures = manager.write_pipe_comments(to_tag)
-            failures.extend(comment_failures)
             tags, created, reused, tag_failures = manager.ensure_tags(to_tag)
             failures.extend(tag_failures)
             transaction.Commit()
@@ -466,8 +464,7 @@ def main():
 
     # --- the receipt ------------------------------------------------------
     summary = (':white_heavy_check_mark: **Tag Manual**: {0} tag(s) created, '
-               '{1} reused, Comments written on {2} pipe(s), {3} pick(s).'
-               .format(created, reused, written, picks))
+               '{1} reused, {2} pick(s).'.format(created, reused, picks))
     if ignored:
         summary += ' {0} unsupported element(s) ignored.'.format(len(ignored))
     output.print_md(summary)

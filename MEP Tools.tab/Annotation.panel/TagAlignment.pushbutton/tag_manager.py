@@ -50,7 +50,7 @@ class TagManager(object):
         self.view = view
         self._tag_type_cache = {}          # tag category int -> ElementId
         self._elevation_cache = {}         # 'high'/'low' -> ElementId
-        self._comments_mode = False        # Auto method: designation -> Comments
+        self._comments_mode = False        # Auto method: one family, no HL/LL switch
         self._existing = self._index_existing_tags()
         self._right, _up = utils.get_view_axes(view)
         self._initial_offset = utils.paper_mm_to_model(
@@ -95,15 +95,17 @@ class TagManager(object):
         """Return the tag already annotating this element, or None."""
         return self._existing.get(utils.element_id_value(element.Id))
 
-    # -- Auto (Comments) mode ----------------------------------------------
+    # -- Auto (single-family) mode ------------------------------------------
     def set_comments_mode(self, enabled):
-        """Switch the Auto method's Comments behaviour on or off.
+        """Pin the Auto pipeline's single-tag-family behaviour on or off.
 
-        When on, the designation (F/B, AT H/L, ...) is WRITTEN into each pipe's
-        built-in Comments parameter and one ordinary tag family shows it - so
-        the per-pipe tag-type switching (HL/LL tag) is turned off and
-        every pipe uses the single chosen pipe tag. When off, the tool keeps its
-        original tag-type + tag-parameter behaviour.
+        Historical name: this switch once ALSO wrote each pipe's designation
+        (AT H/L / AT L/L) into its built-in Comments. That write was removed
+        on the user's order (2026-09-03: "you should not add any words in the
+        comment section") - the tools no longer modify Comments, or any other
+        parameter, on the elements they tag. What remains of the mode is the
+        other half of its old job: with it on, the per-pipe HL/LL tag-TYPE
+        switching stays off and every pipe uses the single chosen tag family.
         """
         self._comments_mode = bool(enabled)
 
@@ -332,38 +334,6 @@ class TagManager(object):
         except Exception:
             return None
 
-    def _horizontal_designation(self, pipe):
-        """Return AT H/L / AT L/L for a horizontal pipe on a plan, or None.
-
-        High Level at or above config.AUTO_HORIZONTAL_THRESHOLD_MM above the
-        plan's floor, Low Level below it. None for a vertical pipe (a riser -
-        they carry no designation), a non-plan view, or a pipe whose height
-        cannot be measured. Every horizontal pipe qualifies - no system filter.
-        """
-        if not config.AUTO_TAG_ENABLED:
-            return None
-        if self._plan_level_elevation() is None:
-            return None    # not a plan view
-        direction = utils.get_element_direction(pipe)
-        if direction is None or abs(direction.Z) >= 0.7:
-            return None    # vertical (a riser) or no direction
-        height = self._pipe_height_above_floor(pipe)
-        if height is None:
-            return None
-        threshold = utils.mm_to_feet(config.AUTO_HORIZONTAL_THRESHOLD_MM)
-        return config.AUTO_HL if height >= threshold else config.AUTO_LL
-
-    def _pipe_designation(self, pipe):
-        """Return the Auto designation to write into a pipe's Comments, or None.
-
-        A pipe on a plan gets AT H/L / AT L/L by height. None when the rule does
-        not apply (not a pipe, not a plan, no geometry, or a vertical pipe -
-        risers carry no designation since the flow prompt was removed).
-        """
-        if not isinstance(pipe, Pipe):
-            return None
-        return self._horizontal_designation(pipe)
-
     # -- runtime tag type selection ----------------------------------------
     def categories_needing_tags(self, elements):
         """Return {category id: category name} for elements with no tag yet.
@@ -446,51 +416,6 @@ class TagManager(object):
         )
 
     # -- public API --------------------------------------------------------
-    def write_pipe_comments(self, elements):
-        """Write each pipe's Auto designation into its built-in Comments.
-
-        This is a MODEL change, so it must run inside the caller's transaction.
-        A single tag family (Size + System Abbreviation + Comments) then shows
-        the value. Non-pipes and pipes the rule does not cover are left
-        untouched - a blank designation never clears an existing comment.
-
-        Args:
-            elements (list): The elements about to be tagged.
-
-        Returns:
-            tuple: (written, failures) where failures is a list of
-            (element_id, message).
-        """
-        written = 0
-        failures = []
-        for element in elements:
-            if not isinstance(element, Pipe):
-                continue
-            designation = self._pipe_designation(element)
-            if designation is None:
-                continue
-            element_id = utils.element_id_value(element.Id)
-            try:
-                parameter = element.get_Parameter(
-                    BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
-                if parameter is None or parameter.IsReadOnly:
-                    parameter = element.LookupParameter('Comments')
-                if parameter is None or parameter.IsReadOnly:
-                    failures.append(
-                        (element_id, 'Comments parameter is not writable'))
-                    continue
-                parameter.Set(designation)
-                written += 1
-            except Exception as ex:
-                failures.append((element_id, str(ex)))
-                utils.logger.error(
-                    'Writing Comments on pipe {} failed: {}'.format(
-                        element_id, ex))
-
-        utils.logger.debug('Auto Comments written on {} pipe(s), {} failed.'
-                           .format(written, len(failures)))
-        return written, failures
-
     def ensure_tags(self, elements):
         """Ensure every element has exactly one tag in the view.
 
